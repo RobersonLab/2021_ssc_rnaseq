@@ -1,0 +1,288 @@
+---
+title: "Parsing WGCNA and making tables"
+author: "Eli"
+date: "September 18, 2019"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+# Setup
+```{r libraries}
+library( here )
+library( tidyverse )
+library( UpSetR )
+```
+
+```{r source_shared}
+source( here::here( 'src', 'shared_project_functions.R' ) )
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = TRUE,
+	message = FALSE,
+	fig.path = paste0( figure_dir, '/' ),
+	fig.keep = 'all',
+	dpi = 300,
+	fig.width = 11,
+	fig.height = 8.5
+)
+```
+
+# Load data
+```{r gene_annotation}
+ensembl <- read_tsv( file = here::here( 'data', 'biomart_gene_transcript_map.txt.gz' ), col_names = TRUE ) %>%
+  dplyr::rename( .data = ., gene_id = `Gene stable ID` ) %>%
+  dplyr::rename( .data = ., symbol = `Gene name` ) %>%
+  dplyr::rename( .data = ., gene_biotype = `Gene type` ) %>%
+  select( .data = ., gene_id, symbol, gene_biotype ) %>%
+  as.data.frame( . ) %>%
+  unique( . )
+```
+
+# Load DEGs from unspliced counts
+```{r load_degs_unspliced}
+skin_deg <- read_tsv( file = here::here( "results", "DiffExp_0m_SSc_over_Control_Skin_unspliced.tsv" ) ) %>%
+  filter( qval < 0.05 ) %>%
+  dplyr::rename( `SSc / Control FoldChange` = FoldChange ) %>%
+  select( gene_id, `SSc / Control FoldChange` )
+
+pbmc_deg <- read_tsv( file = here::here( "results", "DiffExp_0m_SSc_over_Control_PBMC_unspliced.tsv" ) ) %>%
+  filter( qval < 0.05 ) %>%
+  dplyr::rename( `SSc / Control FoldChange` = FoldChange ) %>%
+  select( gene_id, `SSc / Control FoldChange` )
+```
+
+# PBMC WGCNA
+```{r parse_pbmc}
+pbmc_dlco <- read_tsv( file = here::here( "results", "wgcna" , "PBMC_unspliced_WGCNA_table_DLCO_perc_pred.tsv" ) ) %>%
+  filter( p.GS.Status < 0.05 ) %>%
+  select( gene_id:p.GS.Status ) %>%
+  dplyr::rename( `DLCO Correlation` = GS.corr.Status ) %>%
+  dplyr::rename( `DLCO pvalue` = p.GS.Status ) %>%
+  write_tsv( x = ., path = here::here( "results", "WGCNA_PBMC_DLCO_filtered.tsv" ) ) %>%
+  select( gene_id, ends_with( "Correlation" ), ends_with( "pvalue" ) )
+
+pbmc_forearm_mrss <- read_tsv( file = here::here( "results", "wgcna", "PBMC_unspliced_WGCNA_table_Forearm_MRSS.tsv" ) ) %>%
+  filter( p.GS.Status < 0.05 ) %>%
+  select( gene_id:p.GS.Status ) %>%
+  dplyr::rename( `Forearm MRSS Correlation` = GS.corr.Status ) %>%
+  dplyr::rename( `Forearm MRSS pvalue` = p.GS.Status ) %>%
+  write_tsv( x = ., path = here::here( "results", "WGCNA_PBMC_ForearmMRSS_filtered.tsv" ) ) %>%
+  select( gene_id, ends_with( "Correlation" ), ends_with( "pvalue" ) )
+
+# pbmc_fvc = read_tsv( file = here::here( "results", "wgcna", "PBMC_unspliced_WGCNA_table_FVC_perc_pred.tsv" ) ) %>%
+#   filter( p.GS.Status < 0.05 ) %>%
+#   select( gene_id:p.GS.Status ) %>%
+#   dplyr::rename( `FVC Correlation` = GS.corr.Status ) %>%
+#   dplyr::rename( `FVC pvalue` = p.GS.Status ) %>%
+#   write_tsv( x = ., path = here::here( "results", "WGCNA_PBMC_FVC_filtered.tsv" ) ) %>%
+#   select( gene_id, ends_with( "Correlation" ), ends_with( "pvalue" ) )
+
+pbmc_mrss = read_tsv( file = here::here( "results", "wgcna", "PBMC_unspliced_WGCNA_table_MRSS.tsv" ) ) %>%
+  filter( p.GS.Status < 0.05 ) %>%
+  select( gene_id:p.GS.Status ) %>%
+  dplyr::rename( `Total MRSS Correlation` = GS.corr.Status ) %>%
+  dplyr::rename( `Total MRSS pvalue` = p.GS.Status ) %>%
+  write_tsv( x = ., path = here::here( "results", "WGCNA_PBMC_MRSS_filtered.tsv" ) ) %>%
+  select( gene_id, ends_with( "Correlation" ), ends_with( "pvalue" ) )
+
+merged_pbmc <- merge( 
+  x = pbmc_mrss, 
+  y = pbmc_forearm_mrss, 
+  by = "gene_id", 
+  all = TRUE ) %>%
+#  merge( x = ., y = pbmc_fvc, by = "gene_id", all = TRUE ) %>%
+  merge( x = ., y = pbmc_dlco, by = "gene_id", all = TRUE ) %>%
+  merge( x = pbmc_deg, y = ., by = "gene_id", all.y = TRUE ) %>%
+  merge( x = ensembl, y = ., by = "gene_id", all.y = TRUE ) %>%
+ # arrange( `Total MRSS pvalue`, `Forearm MRSS pvalue`, `FVC pvalue`, `DLCO pvalue` ) %>%
+  arrange( `Total MRSS pvalue`, `Forearm MRSS pvalue`, `DLCO pvalue` ) %>%
+  write_tsv( x = ., path = here::here( "results", "pbmc_wgcna_merged.tsv" ) )
+```
+
+```{r pbmc_wgcna_upset}
+de_list_pbmc <- pull( pbmc_deg, gene_id )
+dlco_list_pbmc <- pull( pbmc_dlco, gene_id )
+#fvc_list_pbmc <- pull( pbmc_fvc, gene_id )
+forearm_mrss_list_pbmc <- pull( pbmc_forearm_mrss, gene_id )
+mrss_list_pbmc <- pull( pbmc_mrss, gene_id )
+
+pbmc_upset_frame <- unique( c( de_list_pbmc, dlco_list_pbmc, forearm_mrss_list_pbmc, mrss_list_pbmc ) ) %>%
+  #unique( c( de_list_pbmc, dlco_list_pbmc, fvc_list_pbmc, forearm_mrss_list_pbmc, mrss_list_pbmc ) ) %>%
+  data.frame( gene_id = . ) %>%
+  mutate( DEG = case_when(
+    gene_id %in% de_list_pbmc ~ 1,
+    TRUE ~ 0
+  )) %>%
+  mutate( DLCO = case_when(
+    gene_id %in% dlco_list_pbmc ~ 1,
+    TRUE ~ 0
+  )) %>%
+  # mutate( FVC = case_when(
+  #   gene_id %in% fvc_list_pbmc ~ 1,
+  #   TRUE ~ 0
+  # )) %>%
+  mutate( `Forearm MRSS` = case_when(
+    gene_id %in% forearm_mrss_list_pbmc ~ 1,
+    TRUE ~ 0
+  )) %>%
+  mutate( MRSS = case_when(
+    gene_id %in% mrss_list_pbmc ~ 1,
+    TRUE ~ 0
+  ))
+
+pbmc_upset_plot <- upset( pbmc_upset_frame, 
+                          text.scale = c( 2, 2, 1.2, 1.2, 2, 2 ), 
+                          point.size = 3, 
+                          nintersects = NA, 
+                          order.by = "freq" )
+
+pbmc_upset_plot
+```
+
+# Skin WGCNA
+```{r parse_skin}
+skin_dlco <- read_tsv( file = here::here( "results", "wgcna" , "Skin_unspliced_WGCNA_table_DLCO_perc_pred.tsv" ) ) %>%
+  filter( p.GS.Status < 0.05 ) %>%
+  select( gene_id:p.GS.Status ) %>%
+  dplyr::rename( `DLCO Correlation` = GS.corr.Status ) %>%
+  dplyr::rename( `DLCO pvalue` = p.GS.Status ) %>%
+  write_tsv( x = ., path = here::here( "results", "WGCNA_Skin_DLCO_filtered.tsv" ) ) %>%
+  select( gene_id, ends_with( "Correlation" ), ends_with( "pvalue" ) )
+
+# skin_forearm_mrss <- read_tsv( file = here::here( "results", "wgcna", "Skin_unspliced_WGCNA_table_Forearm_MRSS.tsv" ) ) %>%
+#   filter( p.GS.Status < 0.05 ) %>%
+#   select( gene_id:p.GS.Status ) %>%
+#   dplyr::rename( `Forearm MRSS Correlation` = GS.corr.Status ) %>%
+#   dplyr::rename( `Forearm MRSS pvalue` = p.GS.Status ) %>%
+#   write_tsv( x = ., path = here::here( "results", "WGCNA_Skin_ForearmMRSS_filtered.tsv" ) ) %>%
+#   select( gene_id, ends_with( "Correlation" ), ends_with( "pvalue" ) )
+
+skin_fvc = read_tsv( file = here::here( "results", "wgcna", "Skin_unspliced_WGCNA_table_FVC_perc_pred.tsv" ) ) %>%
+  filter( p.GS.Status < 0.05 ) %>%
+  select( gene_id:p.GS.Status ) %>%
+  dplyr::rename( `FVC Correlation` = GS.corr.Status ) %>%
+  dplyr::rename( `FVC pvalue` = p.GS.Status ) %>%
+  write_tsv( x = ., path = here::here( "results", "WGCNA_Skin_FVC_filtered.tsv" ) ) %>%
+  select( gene_id, ends_with( "Correlation" ), ends_with( "pvalue" ) )
+
+skin_mrss = read_tsv( file = here::here( "results", "wgcna", "Skin_unspliced_WGCNA_table_MRSS.tsv" ) ) %>%
+  filter( p.GS.Status < 0.05 ) %>%
+  select( gene_id:p.GS.Status ) %>%
+  dplyr::rename( `Total MRSS Correlation` = GS.corr.Status ) %>%
+  dplyr::rename( `Total MRSS pvalue` = p.GS.Status ) %>%
+  write_tsv( x = ., path = here::here( "results", "WGCNA_Skin_MRSS_filtered.tsv" ) ) %>%
+  select( gene_id, ends_with( "Correlation" ), ends_with( "pvalue" ) )
+
+# merged_skin <- merge( 
+#   x = skin_mrss, 
+#   y = skin_forearm_mrss, 
+#   by = "gene_id", 
+#   all = TRUE ) %>%
+merged_skin <- merge( x = skin_mrss, y = skin_fvc, by = "gene_id", all = TRUE ) %>%
+  merge( x = ., y = skin_dlco, by = "gene_id", all = TRUE ) %>%
+  merge( x = skin_deg, y = ., by = "gene_id", all.y = TRUE ) %>%
+  merge( x = ensembl, y = ., by = "gene_id", all.y = TRUE ) %>%
+  #arrange( `Total MRSS pvalue`, `Forearm MRSS pvalue`, `FVC pvalue`, `DLCO pvalue` ) %>%
+  arrange( `Total MRSS pvalue`, `FVC pvalue`, `DLCO pvalue` ) %>%
+  write_tsv( x = ., path = here::here( "results", "skin_wgcna_merged.tsv" ) )
+```
+
+```{r skin_wgcna_upset}
+de_list_skin <- pull( skin_deg, gene_id )
+dlco_list_skin <- pull( skin_dlco, gene_id )
+fvc_list_skin <- pull( skin_fvc, gene_id )
+#forearm_mrss_list_skin <- pull( skin_forearm_mrss, gene_id )
+mrss_list_skin <- pull( skin_mrss, gene_id )
+
+skin_upset_frame <- unique( c( de_list_skin, dlco_list_skin, fvc_list_skin, mrss_list_skin ) ) %>%
+  #unique( c( de_list_skin, dlco_list_skin, fvc_list_skin, forearm_mrss_list_skin, mrss_list_skin ) ) %>%
+  data.frame( gene_id = . ) %>%
+  mutate( DEG = case_when(
+    gene_id %in% de_list_skin ~ 1,
+    TRUE ~ 0
+  )) %>%
+  mutate( DLCO = case_when(
+    gene_id %in% dlco_list_skin ~ 1,
+    TRUE ~ 0
+  )) %>%
+  mutate( FVC = case_when(
+    gene_id %in% fvc_list_skin ~ 1,
+    TRUE ~ 0
+  )) %>%
+  # mutate( `Forearm MRSS` = case_when(
+  #   gene_id %in% forearm_mrss_list_skin ~ 1,
+  #   TRUE ~ 0
+  # )) %>%
+  mutate( MRSS = case_when(
+    gene_id %in% mrss_list_skin ~ 1,
+    TRUE ~ 0
+  ))
+
+skin_upset_plot <- upset( skin_upset_frame, text.scale = c( 2, 2, 1.2, 1.2, 2, 2 ), point.size = 3, nintersects = NA, order.by = "freq" )
+
+skin_upset_plot
+```
+
+```{r shared_correlations}
+dlco_shared <- intersect( x = dlco_list_pbmc, y = dlco_list_skin )
+#forearm_mrss_shared <- intersect( x = forearm_mrss_list_pbmc, y = forearm_mrss_list_skin )
+#fvc_shared <- intersect( x = fvc_list_pbmc, y = fvc_list_skin )
+mrss_shared <- intersect( x = mrss_list_pbmc, y = mrss_list_skin )
+
+length( dlco_shared )
+#length( forearm_mrss_shared )
+#length( fvc_shared )
+length( mrss_shared )
+
+tmp_shared_dlco <- merge( x = filter( pbmc_dlco, gene_id %in% dlco_shared ),
+       y = filter( skin_dlco, gene_id %in% dlco_shared ),
+       by = "gene_id",
+       suffixes = c( " - PBMC", " - Skin" ) ) %>%
+  dplyr::rename( `PBMC Correlation` = ends_with( "Correlation - PBMC" ) ) %>%
+  dplyr::rename( `PBMC pvalue` = ends_with( "pvalue - PBMC" ) ) %>%
+  dplyr::rename( `Skin Correlation` = ends_with( "Correlation - Skin" ) ) %>%
+  dplyr::rename( `Skin pvalue` = ends_with( "pvalue - Skin" ) ) %>%
+  mutate( Trait = "DLCO" )
+
+# tmp_shared_fvc <- merge( x = filter( pbmc_fvc, gene_id %in% fvc_shared ),
+#        y = filter( skin_fvc, gene_id %in% fvc_shared ),
+#        by = "gene_id",
+#        suffixes = c( " - PBMC", " - Skin" ) ) %>%
+#   dplyr::rename( `PBMC Correlation` = ends_with( "Correlation - PBMC" ) ) %>%
+#   dplyr::rename( `PBMC pvalue` = ends_with( "pvalue - PBMC" ) ) %>%
+#   dplyr::rename( `Skin Correlation` = ends_with( "Correlation - Skin" ) ) %>%
+#   dplyr::rename( `Skin pvalue` = ends_with( "pvalue - Skin" ) ) %>%
+#   mutate( Trait = "FVC" )
+#   
+tmp_shared_mrss <- merge( x = filter( pbmc_mrss, gene_id %in% mrss_shared ),
+       y = filter( skin_mrss, gene_id %in% mrss_shared ),
+       by = "gene_id",
+       suffixes = c( " - PBMC", " - Skin" ) ) %>%
+  dplyr::rename( `PBMC Correlation` = ends_with( "Correlation - PBMC" ) ) %>%
+  dplyr::rename( `PBMC pvalue` = ends_with( "pvalue - PBMC" ) ) %>%
+  dplyr::rename( `Skin Correlation` = ends_with( "Correlation - Skin" ) ) %>%
+  dplyr::rename( `Skin pvalue` = ends_with( "pvalue - Skin" ) ) %>%
+  mutate( Trait = "MRSS" )
+
+#rbind( tmp_shared_dlco, tmp_shared_fvc ) %>%
+  rbind( tmp_shared_dlco, tmp_shared_mrss ) %>%
+  mutate( CorrelationDirectionality = case_when(
+    sign( `PBMC Correlation` ) == sign( `Skin Correlation` ) ~ "Concordant",
+    TRUE ~ "Discordant"
+  )) %>%
+  merge( ensembl, ., by = "gene_id" ) %>%
+  arrange( symbol, Trait ) %>%
+  write_tsv( x = ., path = here::here( "results", "WGCNA_Shared_Genes.tsv" ) )
+```
+
+# Session info
+```{r versions}
+Sys.time()
+
+getwd()
+  
+sessionInfo()
+```

@@ -1,0 +1,180 @@
+---
+title: "SSc sample ComBat-Seq Adjusted counts, normalized expression"
+author: "Eli"
+date: "April 03, 2019"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r libraries}
+library( here )
+library( tidyverse )
+library( DESeq2 )
+library( sva ) ## CRITICALLY IMPORTANT NOTE FOLLOWS
+
+# ComBat_seq is from a fork of the development version of sva
+# see this link to install: https://github.com/zhangyuqing/ComBat-seq
+# preprint: https://www.biorxiv.org/content/10.1101/2020.01.13.904730v1
+```
+
+```{r setup_parallel_execution}
+RUN_IN_PARALLEL = FALSE
+PARALLEL_THREADS = 10
+
+# ATTN VERY IMPORTANT WARNING
+# I was running this either on Windows 10
+# or Linux. If you're using something else
+# you will likely need to either change
+# this logic or disable parallel
+# operation.
+
+if ( RUN_IN_PARALLEL & .Platform$OS.type == "windows" ) {
+  library( doSNOW )
+  local_cluster <- makeCluster( PARALLEL_THREADS )
+  registerDoSNOW( local_cluster )
+} else if ( RUN_IN_PARALLEL & .Platform$OS.type == "unix" ) {
+  library( doMC )
+  registerDoMC( PARALLEL_THREADS )
+}
+```
+
+```{r source_shared}
+source( here::here( 'src', 'shared_project_functions.R' ) )
+```
+
+```{r gene_annotation}
+ensembl <- read_tsv( file = here::here( 'data', 'biomart_gene_transcript_map.txt.gz' ), col_names = TRUE ) %>%
+  dplyr::rename( .data = ., gene_id = `Gene stable ID` ) %>%
+  dplyr::rename( .data = ., symbol = `Gene name` ) %>%
+  dplyr::rename( .data = ., gene_biotype = `Gene type` ) %>%
+  select( .data = ., gene_id, symbol, gene_biotype ) %>%
+  as.data.frame( . ) %>%
+  unique( . )
+
+ensembl_gene_ids <- pull( ensembl, gene_id )
+```
+
+```{r rgsm}
+rgsm <- read_csv( file = here::here( 'data', 'ssc_rnaseq_readgroup_info.csv' ) ) %>%
+  select( .data = ., RGSM, Individual, Status, GenStatus, Tissue, Cohort, Machine, Cycles ) %>%
+  #filter( GenStatus == "SSc" ) %>%
+  as.data.frame( . ) %>%
+  unique( . )
+
+rgsm_list <- rgsm %>%
+  pull( RGSM ) %>%
+  sort( . ) %>%
+  unique( . )
+
+demographics <- read_csv( file = here::here( "data", "demographics.csv" ) ) %>%
+  filter( Subtype %in% c( 'Control', 'lcSSc', 'dcSSc' ) ) %>%
+  select( Individual, Sex, Subtype )
+```
+
+```{r design}
+design_tbl <- merge( rgsm, demographics, by = "Individual" ) %>%
+  select( .data = ., RGSM, Status, Machine, Sex, Tissue, Subtype, Cohort ) %>%
+  as.data.frame( . )
+rownames( design_tbl ) = design_tbl$RGSM
+```
+
+## SAF
+```{r read_gene_counts_unspliced}
+gene_counts <- read_tsv( file = here::here( 'results', 'unspliced_featurecounts.tsv.gz' ), col_types = cols( .default = col_integer(), gene_id = col_character() ) ) %>%
+  filter( gene_id %in% ensembl_gene_ids ) %>%
+  as.data.frame( . ) %>%
+  column_to_rownames( "gene_id" ) %>%
+  as.matrix( . )
+
+both_ids <- intersect( rownames( design_tbl ), colnames( gene_counts ) )
+design_tbl <- design_tbl[ both_ids, ]
+gene_counts <- gene_counts[ ,both_ids ]
+```
+
+```{r prefilter_counts}
+detection_status <- apply( X = gene_counts, 
+                           MARGIN = 1, 
+                           FUN = detect, 
+                           cutoff = min_reads_detection_threshold )
+
+detection_idx <- which( detection_status >= min_detected_samples_for_de )
+
+gene_counts <- gene_counts[ detection_idx, ]
+```
+
+```{r adjust_by_sex_and_seqmachine}
+design_tbl <- design_tbl %>%
+  mutate( adjustment = paste0( Cohort, "_", Sex ) )
+
+adjustment_factor <- pull( design_tbl, adjustment ) %>%
+  as.factor( . )
+
+#biological_factor <- pull( design_tbl, Status ) %>%
+#  as.factor( . )
+
+biological_df <- design_tbl %>%
+  select( Tissue, Subtype, RGSM ) %>%
+  as.data.frame( . ) %>%
+  mutate( Tissue = factor( Tissue ) ) %>%
+  mutate( Subtype = factor( Subtype ) ) %>%
+  column_to_rownames( "RGSM" )
+
+biological_df <- biological_df[ colnames( gene_counts ), ]
+
+with( design_tbl, table( Status ) )
+with( design_tbl, table( Machine, Sex ) )
+with( design_tbl, table( Status, Sex ) )
+```
+
+```{r combat_seq}
+adjusted_counts <- ComBat_seq( counts = gene_counts,
+                               batch = adjustment_factor,
+                               covar_mod = biological_df,
+                               full_mod = TRUE )
+
+adjusted_counts %>%
+  as.data.frame( . ) %>%
+  rownames_to_column( "gene_id" ) %>%
+  write_tsv( x = ., path = here::here( 'results', 'unspliced_featurecounts_combat_adjusted.tsv.gz' ) )
+```
+
+```{r load_into_deseq2_unspliced}
+deseqObj <- DESeqDataSetFromMatrix( countData = adjusted_counts, 
+                                    colData = design_tbl, 
+                                    design = ~ Status )
+
+deseqObj <- DESeq( deseqObj, 
+                   test = "Wald", 
+                   betaPrior = FALSE, 
+                   parallel = RUN_IN_PARALLEL )
+```
+
+```{r extracting_logrratio_unspliced}
+assay( rlog( deseqObj, blind=FALSE ) ) %>%
+  as.data.frame( . ) %>%
+  rownames_to_column( "gene_id" ) %>%
+  	write_csv( x = ., path =  here::here( 'results', 'unspliced_wgcna_rlog_combat_adjusted.csv.gz' ) ) 
+```
+
+```{r vst_unspliced}
+assay( vst( deseqObj, blind=FALSE ) ) %>%
+  as.data.frame( . ) %>%
+  rownames_to_column( "gene_id" ) %>%
+  	write_csv( x = ., path =  here::here( 'results', 'unspliced_wgcna_vst_combat_adjusted.csv.gz' ) ) 
+```
+
+```{r cleanup_parallel_executuion}
+if ( RUN_IN_PARALLEL & .Platform$OS.type == "windows" ) {
+  stopCluster( local_cluster )
+} 
+```
+
+# Session info
+```{r versions}
+Sys.time()
+
+getwd()
+  
+sessionInfo()
+```

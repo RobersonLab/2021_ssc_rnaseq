@@ -1,0 +1,50 @@
+#PBS -S /bin/bash
+#PBS -l nodes=1:ppn=4
+#PBS -l mem=13g
+#PBS -l walltime=023:59:00
+
+###############################
+# Move to execution directory #
+###############################
+cd $PBS_O_WORKDIR
+
+################################
+# source environment variables #
+################################
+source environment_variables.sh
+
+#####################
+# setup directories #
+#####################
+mkdir -p $MERGE_BAM_DIR
+
+#############
+# java load #
+#############
+module load jre1.8.0_40
+
+#######################
+# Java variable setup #
+#######################
+GB_MEM_NUMBER=12
+JAVA_MEM=${GB_MEM_NUMBER}g
+RECORDS_PER_GB=250000 # for picard
+MAX_RECORDS=`bc <<< "$GB_MEM_NUMBER * $RECORDS_PER_GB"`
+
+###############
+# sample vars #
+###############
+RGSM=`bin/getline.py $RGSM_NAMES $PBS_ARRAYID`
+MERGESTRING=`bin/picard_merge_string_generator.py --starpath $STAR_DIR $RG_INFO_FILE $RGSM mergecmd`
+OUTBAM=${MERGE_BAM_DIR}/${RGSM}_rgid.bam
+
+########
+# sort #
+########
+java -jar -Xmx${JAVA_MEM} -XX:ParallelGCThreads=$PBS_NUM_PPN $PICARD MergeSamFiles \
+MAX_RECORDS_IN_RAM=${MAX_RECORDS} \
+CREATE_INDEX=true \
+SORT_ORDER=coordinate \
+OUTPUT=${OUTBAM} \
+$MERGESTRING
+

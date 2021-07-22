@@ -1,0 +1,210 @@
+---
+title: "PCA samples"
+author: "Eli"
+date: "September 23, 2020"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+# Setup
+```{r libraries}
+library( here )
+library( tidyverse )
+library( cowplot )
+```
+
+```{r source_shared}
+source( here::here( 'src', 'shared_project_functions.R' ) )
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = TRUE,
+	message = FALSE,
+	fig.path = paste0( figure_dir, '/' ),
+	fig.keep = 'all',
+	dpi = 300,
+	fig.width = 11,
+	fig.height = 8.5
+)
+```
+
+```{r constants}
+number_genes_for_pca <- 100
+```
+
+# Load data
+```{r gene_annotation}
+ensembl <- read_tsv( file = here::here( 'data', 'biomart_gene_transcript_map.txt.gz' ), col_names = TRUE ) %>%
+  dplyr::rename( .data = ., gene_id = `Gene stable ID` ) %>%
+  dplyr::rename( .data = ., symbol = `Gene name` ) %>%
+  dplyr::rename( .data = ., gene_biotype = `Gene type` ) %>%
+  select( .data = ., gene_id, symbol, gene_biotype ) %>%
+  as.data.frame( . ) %>%
+  unique( . )
+```
+
+```{r demographics}
+demographics <- read_csv( file = here( "data", "demographics.csv" ) )
+```
+
+```{r info}
+rgsm <- read_csv( file = here::here( 'data', 'ssc_rnaseq_readgroup_info.csv' ) ) %>%
+  select( .data = ., RGSM, Individual, Status, GenStatus, Tissue, Cohort, Machine, Cycles ) %>%
+  #filter( GenStatus == "SSc" ) %>%
+  as.data.frame( . ) %>%
+  unique( . )
+```
+
+```{r sample_info}
+info <- merge( x = select( rgsm, RGSM, Individual, Tissue ),
+               y = select( demographics, Individual, Sex, Subtype ), by = "Individual" )
+```
+
+```{r expression}
+expression <- read_csv( file = here( "results", "unspliced_all_sample_rlog.csv.gz" ) ) %>%
+  as.data.frame( . ) %>%
+  column_to_rownames( "gene_id" ) %>%
+  as.matrix( . )
+```
+
+```{r deg_pbmc}
+pbmc_deg_ids <- read_tsv( file = here( "results", "DiffExp_0m_SSc_over_Control_PBMC_unspliced.tsv" ) ) %>%
+  filter( gene_id %in% ensembl$gene_id ) %>%
+  top_n( x = ., n = -1 * number_genes_for_pca, wt = qval ) %>%
+  top_n( x = ., n = -1 * number_genes_for_pca, wt = pval ) %>%
+  pull( gene_id )
+```
+
+```{r deg_skin}
+skin_deg_ids <- read_tsv( file = here( "results", "DiffExp_0m_SSc_over_Control_Skin_unspliced.tsv" ) ) %>%
+  filter( gene_id %in% ensembl$gene_id ) %>%
+  top_n( x = ., n = -1 * number_genes_for_pca, wt = qval ) %>%
+  top_n( x = ., n = -1 * number_genes_for_pca, wt = pval ) %>%
+  pull( gene_id )
+```
+
+# PBMC data
+```{r pbmc_pca}
+tissue_samples <- info %>%
+  filter( Tissue == "PBMC" ) %>%
+  pull( RGSM )
+
+pca_out <- run_prcomp( expression_matrix = expression,
+            sample_list = tissue_samples,
+            gene_list = pbmc_deg_ids )
+
+percent_variance <- round( pca_out$sdev^2 / sum( pca_out$sdev^2 )* 100.0, 2 )
+
+pca_coords <- pca_out[[ "x" ]] %>%
+  as.data.frame( . ) %>%
+	rownames_to_column( ., "RGSM" ) %>%
+	merge( info, ., by = "RGSM" )
+
+x_label <- paste0( "PC1 (", percent_variance[1], "%)" )
+y_label <- paste0( "PC2 (", percent_variance[2], "%)" )
+
+pbmc_pca_plot <- ggplot( data = pca_coords ,mapping = aes( x = PC1, y = PC2, color = Subtype, shape = Subtype ) ) +
+  theme_bw() +
+  scale_color_manual( values = colorBlindPalette2 ) +
+  geom_point( size = 4.5 ) +
+  theme( legend.position = 'top' ) +
+  gg_bigger_texts +
+  xlab( x_label ) +
+  ylab( y_label )
+
+pbmc_pca_plot
+```
+
+# Skin data
+```{r skin_pca}
+tissue_samples <- info %>%
+  filter( Tissue == "Skin" ) %>%
+  pull( RGSM )
+
+pca_out <- run_prcomp( expression_matrix = expression,
+            sample_list = tissue_samples,
+            gene_list = skin_deg_ids )
+
+percent_variance <- round( pca_out$sdev^2 / sum( pca_out$sdev^2 )* 100.0, 2 )
+
+pca_coords <- pca_out[[ "x" ]] %>%
+  as.data.frame( . ) %>%
+	rownames_to_column( ., "RGSM" ) %>%
+	merge( info, ., by = "RGSM" )
+
+x_label <- paste0( "PC1 (", percent_variance[1], "%)" )
+y_label <- paste0( "PC2 (", percent_variance[2], "%)" )
+
+skin_pca_plot <- ggplot( data = pca_coords ,mapping = aes( x = PC1, y = PC2, color = Subtype, shape = Subtype ) ) +
+  theme_bw() +
+  scale_color_manual( values = colorBlindPalette2 ) +
+  geom_point( size = 4.5 ) +
+  gg_bigger_texts +
+  xlab( x_label ) +
+  ylab( y_label ) +
+  theme( legend.position = "top", legend.background = element_rect( colour = "black" ) ) #+
+  #geom_label_repel( aes( label = RGSM ) )
+
+skin_zoom <- skin_pca_plot +
+  coord_cartesian( xlim = c( -12, 8 ), ylim = c( -6, 5 ) )
+
+skin_pca_plot
+
+skin_zoom
+```
+
+```{r composed_skin_pca}
+legend <- get_legend( skin_pca_plot )
+
+skin_full_grid <- skin_pca_plot + theme( legend.position = "none" )
+skin_zoom_grid <- skin_zoom + theme( legend.position = "none" )
+
+grid1 <- plot_grid( legend, labels = c( "" ) )
+grid2 <- plot_grid( skin_full_grid, skin_zoom_grid, nrow = 1, labels = c( 'a', 'b' ) )
+
+plot_grid( grid1, grid2, nrow = 2, rel_heights = c( 0.3, 5 ) )
+```
+
+```{r skin_pca_no_outlier}
+tissue_samples <- info %>%
+  filter( Tissue == "Skin" ) %>%
+  filter( RGSM != "SSc01_Skin_SSc_6m" ) %>%
+  pull( RGSM )
+
+pca_out <- run_prcomp( expression_matrix = expression,
+            sample_list = tissue_samples,
+            gene_list = skin_deg_ids )
+
+percent_variance <- round( pca_out$sdev^2 / sum( pca_out$sdev^2 )* 100.0, 2 )
+
+pca_coords <- pca_out[[ "x" ]] %>%
+  as.data.frame( . ) %>%
+	rownames_to_column( ., "RGSM" ) %>%
+	merge( info, ., by = "RGSM" )
+
+x_label <- paste0( "PC1 (", percent_variance[1], "%)" )
+y_label <- paste0( "PC2 (", percent_variance[2], "%)" )
+
+skin_pca_plot <- ggplot( data = pca_coords ,mapping = aes( x = PC1, y = PC2, color = Subtype, shape = Subtype ) ) +
+  theme_bw() +
+  scale_color_manual( values = colorBlindPalette2 ) +
+  geom_point( size = 4.5 ) +
+  gg_bigger_texts +
+  xlab( x_label ) +
+  ylab( y_label ) +
+  theme( legend.position = "top", legend.background = element_rect( colour = "black" ) ) #+
+  #geom_label_repel( aes( label = RGSM ) )
+
+skin_pca_plot
+```
+
+# Session info
+```{r versions}
+Sys.time()
+
+getwd()
+  
+sessionInfo()
+```

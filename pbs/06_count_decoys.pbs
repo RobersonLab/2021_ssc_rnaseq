@@ -1,0 +1,38 @@
+#PBS -S /bin/bash
+#PBS -l nodes=1:ppn=4
+#PBS -l mem=250m
+#PBS -l walltime=23:59:00
+
+###############################
+# Move to execution directory #
+###############################
+cd $PBS_O_WORKDIR
+
+################################
+# source environment variables #
+################################
+source environment_variables.sh
+
+#####################
+# setup directories #
+#####################
+mkdir -p $DECOY_COUNT_DIR
+
+#################
+# run variables #
+#################
+BASE=`bin/getline.py $FASTQ_BASE_NAMES $PBS_ARRAYID`
+
+#######
+# run #
+#######
+featureCounts \
+--donotsort \
+-p \
+-a $DECOY_SAF \
+-F SAF \
+-Q $MINMAPQUAL \
+-T $PBS_NUM_PPN \
+-s 0 \
+-o ${DECOY_COUNT_DIR}/${BASE}_unstranded.count \
+${STAR_DIR}/${BASE}/Aligned.out.bam > logs/${BASE}_decoycount.log

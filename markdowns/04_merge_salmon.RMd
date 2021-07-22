@@ -1,0 +1,109 @@
+---
+title: "Merge Salmon estimates"
+author: "Eli"
+date: "March 17, 2019"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r libraries}
+library( here )
+library( tidyverse )
+```
+
+```{r source_shared}
+source( here::here( 'src', 'shared_project_functions.R' ) )
+```
+
+```{r rgsm}
+rgsms <- read_tsv( file = here::here( 'data', 'rgsm_list.txt' ), col_names = 'RGSM' ) %>%
+  pull( RGSM )
+```
+
+```{r merge_gene}
+gene_tpm <- tibble()
+gene_count <- tibble()
+
+for ( idx in 1:length ( rgsms ) ) {
+  curr_name <- rgsms[ idx ]
+  curr_path <- here::here( 'output', 'salmon', curr_name, 'quant.genes.sf' )
+  
+  temp <- read_tsv( file = curr_path, col_names = TRUE, col_types = 'cdddd', progress = FALSE ) %>%
+    select( .data = ., Name, TPM, NumReads )
+  
+  temp_count <- select( temp, Name, NumReads )
+  names( temp_count )[2] = curr_name
+  
+  temp_tpm <- select( temp, Name, TPM )
+  names( temp_tpm )[2] = curr_name
+  
+  # TPM
+  if ( sum( dim( gene_tpm ) ) > 0 ) {
+    gene_tpm <- merge( gene_tpm, temp_tpm, by = "Name", all = TRUE )
+  } else {
+    gene_tpm = temp_tpm
+  }
+  
+  # counts
+  if( sum( dim( gene_count ) ) > 0 ) {
+    gene_count <- merge( gene_count, temp_count, by = "Name", all = TRUE )
+  } else {
+    gene_count = temp_count
+  }
+}
+
+write_csv( x = gene_count, path = here::here( 'results', 'salmon_gene_count.csv.gz' ) )
+write_csv( x = gene_tpm, path = here::here( 'results', 'salmon_gene_tpm.csv.gz' ) )
+
+rm( gene_count )
+rm( gene_tpm )
+rm( temp )
+rm( temp_count )
+rm( temp_tpm )
+```
+
+```{r merge_transcript}
+transcript_tpm <- tibble()
+transcript_count <- tibble()
+
+for ( idx in 1:length ( rgsms ) ) {
+  curr_name <- rgsms[ idx ]
+  curr_path <- here::here( 'output', 'salmon', curr_name, 'quant.sf' )
+  
+  temp <- read_tsv( file = curr_path, col_names = TRUE, col_types = 'cdddd', progress = FALSE ) %>%
+    select( .data = ., Name, TPM, NumReads )
+  
+  temp_count <- select( temp, Name, NumReads )
+  names( temp_count )[2] = curr_name
+  
+  temp_tpm <- select( temp, Name, TPM )
+  names( temp_tpm )[2] = curr_name
+  
+  # TPM
+  if ( sum( dim( transcript_tpm ) ) > 0 ) {
+    transcript_tpm <- merge( transcript_tpm, temp_tpm, by = "Name", all = TRUE )
+  } else {
+    transcript_tpm = temp_tpm
+  }
+  
+  # counts
+  if( sum( dim( transcript_count ) ) > 0 ) {
+    transcript_count <- merge( transcript_count, temp_count, by = "Name", all = TRUE )
+  } else {
+    transcript_count = temp_count
+  }
+}
+
+write_csv( x = transcript_count, path = here::here( 'results', 'salmon_transcript_count.csv.gz' ) )
+write_csv( x = transcript_tpm, path = here::here( 'results', 'salmon_transcript_tpm.csv.gz' ) )
+```
+
+# Session info
+```{r versions}
+Sys.time()
+
+getwd()
+  
+sessionInfo()
+```

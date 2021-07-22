@@ -1,0 +1,59 @@
+#PBS -S /bin/bash
+#PBS -l nodes=1:ppn=4
+#PBS -l mem=5g
+#PBS -l walltime=023:59:00
+
+###########
+# modules #
+###########
+module load jre1.8.0_40
+module load R
+
+###############################
+# Move to execution directory #
+###############################
+cd $PBS_O_WORKDIR
+
+################################
+# source environment variables #
+################################
+source environment_variables.sh
+
+#####################
+# setup directories #
+#####################
+mkdir -p $RNASEQ_METRIC_DIR
+mkdir -p $INSERT_METRIC_DIR
+
+#######
+# Run #
+#######
+RGSM=`bin/getline.py $RGSM_NAMES $PBS_ARRAYID`
+
+#######################
+# Java variable setup #
+#######################
+GB_MEM_NUMBER=4
+JAVA_MEM=${GB_MEM_NUMBER}g
+MAX_RECORDS=`bc <<< "$GB_MEM_NUMBER * $RECORDS_PER_GB"`
+
+###########
+# rna-seq #
+###########
+java -jar -Xmx$JAVA_MEM -XX:ParallelGCThreads=$PBS_NUM_PPN $PICARD CollectRnaSeqMetrics \
+MAX_RECORDS_IN_RAM=$MAX_RECORDS \
+I=${MERGE_BAM_DIR}/${RGSM}_rgid.bam \
+O=${RNASEQ_METRIC_DIR}/${RGSM}.rnaseq_metrics \
+STRAND=FIRST_READ_TRANSCRIPTION_STRAND \
+REF_FLAT=$REF_FLAT \
+RIBOSOMAL_INTERVALS=$RIBOSOMAL_INTERVALS
+
+##########
+# insert #
+##########
+java -jar -Xmx$JAVA_MEM -XX:ParallelGCThreads=$PBS_NUM_PPN $PICARD CollectInsertSizeMetrics \
+MAX_RECORDS_IN_RAM=$MAX_RECORDS \
+I=${MERGE_BAM_DIR}/${RGSM}_rgid.bam \
+O=${INSERT_METRIC_DIR}/${RGSM}.insertsize_metrics \
+H=${INSERT_METRIC_DIR}/${RGSM}_insertsize_histogram.pdf \
+M=0.05

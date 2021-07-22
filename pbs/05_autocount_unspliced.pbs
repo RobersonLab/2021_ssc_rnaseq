@@ -1,0 +1,41 @@
+#PBS -S /bin/bash
+#PBS -l nodes=1:ppn=4
+#PBS -l mem=250m
+#PBS -l walltime=23:59:00
+
+###############################
+# Move to execution directory #
+###############################
+cd $PBS_O_WORKDIR
+
+################################
+# source environment variables #
+################################
+source environment_variables.sh
+
+#####################
+# setup directories #
+#####################
+mkdir -p $UNSPLICED_COUNT_DIR
+
+#################
+# run variables #
+#################
+BASE=`bin/getline.py $FASTQ_BASE_NAMES $PBS_ARRAYID`
+
+STRANDEDNESS_NUM=`bin/get_library_strandedness.py $RG_INFO_FILE $BASE number featurecounts rgid`
+STRANDEDNESS_NAME=`bin/get_library_strandedness.py $RG_INFO_FILE $BASE name featurecounts rgid`
+
+#######
+# run #
+#######
+featureCounts \
+--donotsort \
+-p \
+-a $SAF \
+-F SAF \
+-Q $MINMAPQUAL \
+-T $PBS_NUM_PPN \
+-s $STRANDEDNESS_NUM \
+-o ${UNSPLICED_COUNT_DIR}/${BASE}_${STRANDEDNESS_NAME}.count \
+${STAR_DIR}/${BASE}/Aligned.out.bam > logs/${BASE}_unsplicedcount.log

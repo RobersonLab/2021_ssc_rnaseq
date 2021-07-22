@@ -1,0 +1,187 @@
+---
+title: "Case Demographics"
+author: "Eli Roberson"
+date: "August 07, 2019"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r libraries}
+library( here )
+library( knitr )
+library( tidyverse )
+```
+
+```{r source_shared}
+source( here::here( 'src', 'shared_project_functions.R' ) )
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = TRUE,
+	message = FALSE,
+	fig.path = paste0( figure_dir, '/' ),
+	fig.keep = 'all',
+	dpi = 300,
+	fig.width = 11,
+	fig.height = 8.5
+)
+```
+
+```{r read_and_filter}
+demographics <- read_csv( file = here::here( "data/demographics.csv" ) ) %>%
+  filter( .data = ., Subtype %in% c( 'lcSSc', 'dcSSc' ) ) %>%
+  mutate( GenStatus = Subtype )
+
+clinical <- read_csv( file = here::here( "data/bmi_mrss_meds.csv" ) ) %>%
+  filter( .data = ., Individual %in% demographics$Individual )
+
+lung_fxn <- read_csv( file = here::here( "data/lung_fxn.csv" ) ) %>%
+  filter( .data = ., Individual %in% demographics$Individual )
+```
+
+## Patients with X visits
+```{r visit_table}
+visit_info <- select( demographics, Individual, GenStatus ) %>%
+  merge( ., select( clinical, Individual, Timepoint ), by = "Individual" )
+
+with( visit_info, table( GenStatus, Timepoint ) )
+```
+
+```{r clinical_worsts}
+clinical_params  <- dplyr::group_by( .data = clinical, Individual ) %>%
+  dplyr::summarise(
+    mrss = max( MRSS, na.rm = TRUE ),
+    forearm_mrss = max( Forearm_MRSS, na.rm = TRUE ),
+    bmi = max( BMI, na.rm = TRUE )
+  ) %>%
+  merge( x = ., select( demographics, Individual, GenStatus ) )
+
+lung_params <- dplyr::group_by( .data = lung_fxn, Individual ) %>%
+  dplyr::summarise(
+    fvc = min( FVC_perc_pred, na.rm = TRUE ),
+    tlc = min( TLC_perc_pred, na.rm = TRUE ),
+    dlco_corrected = min( DLCO_perc_pred_corrected, na.rm = TRUE )
+  ) %>%
+  merge( x= ., y = select( demographics, Individual, GenStatus ), by = "Individual" )
+
+merged_clinical <- merge( x = clinical_params, y = lung_params, by = c( "Individual", "GenStatus" ) ) %>%
+  mutate( mrss = case_when(
+    is.finite( mrss ) ~ mrss,
+    TRUE ~ NA_real_
+  )) %>%
+  mutate( forearm_mrss = case_when(
+    is.finite( forearm_mrss ) ~ forearm_mrss,
+    TRUE ~ NA_real_
+  )) %>%
+  mutate( bmi = case_when(
+    is.finite( bmi ) ~ bmi,
+    TRUE ~ NA_real_
+  )) %>%
+  mutate( fvc = case_when(
+    is.finite( fvc ) ~ fvc,
+    TRUE ~ NA_real_
+  )) %>%
+  mutate( tlc = case_when(
+    is.finite( tlc ) ~ tlc,
+    TRUE ~ NA_real_
+  )) %>%
+  mutate( dlco_corrected = case_when(
+    is.finite( dlco_corrected ) ~ dlco_corrected,
+    TRUE ~ NA_real_
+  ))
+```
+
+```{r clinical_summary}
+clinical_summary <- dplyr::group_by( .data = merged_clinical, GenStatus ) %>%
+  dplyr::summarise(
+    mean_mrss = mean( mrss, na.rm = TRUE ),
+    sd_mrss = sd( mrss, na.rm = TRUE ),
+    mean_forearm_mrss = mean( forearm_mrss, na.rm = TRUE ),
+    sd_forearm_mrss = sd( forearm_mrss, na.rm = TRUE ),
+    mean_bmi = mean( bmi, na.rm = TRUE ),
+    sd_bmi = sd( bmi, na.rm = TRUE ),
+    fvc_mean = mean( fvc, na.rm = TRUE ),
+    fvc_sd = sd( fvc, na.rm = TRUE ),
+    tlc_mean = mean( tlc, na.rm = TRUE ),
+    tlc_sd = sd( tlc, na.rm = TRUE ),
+    dlco_corrected_mean = mean( dlco_corrected, na.rm = TRUE ),
+    dlco_corrected_sd = sd( dlco_corrected, na.rm = TRUE )
+  )
+
+#with( demographics, t.test( Enrollment_age ~ GenStatus ) )$p.value
+
+ttest_mrss <- with( merged_clinical, t.test( mrss ~ GenStatus ) )$p.value
+
+ttest_forearm_mrss <- with( merged_clinical, t.test( forearm_mrss ~ GenStatus ) )$p.value
+  
+ttest_bmi <- with( merged_clinical, t.test( bmi ~ GenStatus ) )$p.value
+
+ttest_fvc <- with( merged_clinical, t.test( fvc ~ GenStatus ) )$p.value
+  
+ttest_tlc <- with( merged_clinical, t.test( tlc ~ GenStatus ) )$p.value
+
+ttest_dlco_corrected <- with( merged_clinical, t.test( dlco_corrected ~ GenStatus ) )$p.value
+```
+
+```{r build_table}
+clinical_table <- clinical_summary %>%
+  rbind( NA ) %>%
+  mutate( .data = ., GenStatus = case_when(
+    is.na( GenStatus ) ~ "P",
+    TRUE ~ GenStatus
+  )) %>%
+  mutate( .data = ., `Modified Rodnan Skin Score` = mean_sd_string( mean_mrss, sd_mrss ) ) %>%
+  mutate( .data = ., `Forearm MRSS` = mean_sd_string( mean_forearm_mrss, sd_forearm_mrss ) ) %>%
+  mutate( .data = ., `Body Mass Index [BMI]` = mean_sd_string( mean_bmi, sd_bmi ) ) %>%
+  mutate( .data = ., `Forced Vital Capacity [FVC]` = mean_sd_string( fvc_mean, fvc_sd ) ) %>%
+  mutate( .data = ., `Diffusion Capacity CO` = mean_sd_string( dlco_corrected_mean, dlco_corrected_sd ) ) %>%
+  mutate( .data = ., `Total Lung Capacity [TLC]` = mean_sd_string( tlc_mean, tlc_sd ) ) %>%
+  mutate( .data = ., `Modified Rodnan Skin Score` = case_when(
+    is.na( mean_mrss ) ~ sprintf( "%.2e", ttest_mrss ),
+    TRUE ~ `Modified Rodnan Skin Score`
+  )) %>%
+  mutate( .data = ., `Forearm MRSS` = case_when(
+    is.na( mean_mrss ) ~ sprintf( "%.2e", ttest_forearm_mrss ),
+    TRUE ~ `Forearm MRSS`
+  )) %>%
+  mutate( .data = ., `Body Mass Index [BMI]` = case_when(
+    is.na( mean_mrss ) ~ sprintf( "%.2e", ttest_bmi ),
+    TRUE ~ `Body Mass Index [BMI]`
+  )) %>%
+  mutate( .data = ., `Forced Vital Capacity [FVC]` = case_when(
+    is.na( mean_mrss ) ~ sprintf( "%.2e", ttest_fvc ),
+    TRUE ~ `Forced Vital Capacity [FVC]`
+  )) %>%
+  mutate( .data = ., `Diffusion Capacity CO` = case_when(
+    is.na( mean_mrss ) ~ sprintf( "%.2e", ttest_dlco_corrected ),
+    TRUE ~ `Diffusion Capacity CO`
+  )) %>%
+  mutate( .data = ., `Total Lung Capacity [TLC]` = case_when(
+    is.na( mean_mrss ) ~ sprintf( "%.2e", ttest_tlc ),
+    TRUE ~ `Total Lung Capacity [TLC]`
+  ))
+```
+
+```{r print_clinical_table}
+select( .data = clinical_table,
+    GenStatus,
+    `Modified Rodnan Skin Score`,
+   `Forearm MRSS`,
+   `Body Mass Index [BMI]`,
+   `Forced Vital Capacity [FVC]`,
+   `Diffusion Capacity CO`,
+   `Total Lung Capacity [TLC]` ) %>%
+  t( . ) %>%
+  kable( . )
+```
+
+# Session info
+```{r versions}
+Sys.time()
+
+getwd()
+  
+sessionInfo()
+```

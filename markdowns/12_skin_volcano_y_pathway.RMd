@@ -1,0 +1,124 @@
+---
+title: "Skin pathway figure"
+author: "Eli"
+date: "March 18, 2020"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+# Setup
+```{r libraries}
+library( here )
+library( tidyverse )
+library( cowplot )
+```
+
+```{r source_shared}
+source( here::here( 'src', 'shared_project_functions.R' ) )
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = TRUE,
+	message = FALSE,
+	fig.path = paste0( figure_dir, '/' ),
+	fig.keep = 'all',
+	dpi = 300,
+	fig.width = 11,
+	fig.height = 8.5
+)
+```
+
+# Load data
+```{r gene_annotation}
+ensembl <- read_tsv( file = here::here( 'data', 'biomart_gene_transcript_map.txt.gz' ), col_names = TRUE ) %>%
+  dplyr::rename( .data = ., gene_id = `Gene stable ID` ) %>%
+  dplyr::rename( .data = ., transcript_id = `Transcript stable ID` ) %>%
+  dplyr::rename( .data = ., symbol = `Gene name` ) %>%
+  dplyr::rename( .data = ., gene_biotype = `Gene type` ) %>%
+  dplyr::rename( .data = ., transcript_biotype = `Transcript type` ) %>%
+  select( .data = ., gene_id, symbol ) %>%
+  as.data.frame( . ) %>%
+  unique( . )
+rownames( ensembl ) = ensembl$gene_id
+```
+
+```{r load_skin_down}
+gprof_name <- here::here( 'results', 'gprofiler_results', 'skin_down_gprofile.csv' )
+
+skin_down_gprofile <- parse_raw_gprofile( gprof_file_path = gprof_name, symbol_df = ensembl, title.wrap = 40 )
+
+top_n_down <- top_n( x = skin_down_gprofile, n = -10, wt = adjusted_p_value ) %>%
+  mutate( ., title = fct_inorder( title ) ) %>%
+  mutate( ., title = fct_rev( title ) )
+
+skin_down_ggplot <- ggplot( top_n_down, aes( y = -log10( adjusted_p_value ), x = title ) ) +
+      theme_classic() +
+      gg_bigger_texts +
+      gg_center_title +
+      coord_flip() +
+      geom_col() +
+      geom_hline( yintercept = -log10( 0.05 ), linetype = 2, colour = "white" ) +
+      ylab( parse( text="-log[10](Adj.~P-value)" ) ) +
+      xlab( "Pathway\n" ) +
+      ggtitle( paste0( "Top ", nrow( top_n_down ), " Decreased Enrichments" ) ) +
+      theme( axis.text = element_text( size = 16 ) )
+```
+
+```{r load_skin_up}
+gprof_name <- here::here( 'results', 'gprofiler_results', 'skin_up_gprofile.csv' )
+
+skin_up_gprofile <- parse_raw_gprofile( gprof_file_path = gprof_name, symbol_df = ensembl, title.wrap = 40 )
+
+top_n_up <- top_n( x = skin_up_gprofile, n = -18, wt = adjusted_p_value ) %>%
+  mutate( ., title = fct_inorder( title ) ) %>%
+  mutate( ., title = fct_rev( title ) )
+
+skin_up_ggplot <- ggplot( top_n_up, aes( y = -log10( adjusted_p_value ), x = title ) ) +
+      theme_classic() +
+      gg_bigger_texts +
+      gg_center_title +
+      coord_flip() +
+      geom_col() +
+      geom_hline( yintercept = -log10( 0.05 ), linetype = 2, colour = "white" ) +
+      ylab( parse( text="-log[10](Adj.~P-value)" ) ) +
+      xlab( "Pathway\n" ) +
+      ggtitle( paste0( "Top ", nrow( top_n_up ), " Increased Enrichments" ) ) +
+      theme( axis.text = element_text( size = 16 ) )
+```
+
+```{r skin_load_deg}
+deg_gene_stats <- read_tsv( file = here::here( 'results', 'DiffExp_0m_SSc_over_Control_Skin_unspliced.tsv' ) )
+
+skin_volcano <- make_ggplot_volcano( deg_dataframe = deg_gene_stats, case_name = "SSc", control_name = "Control" )
+```
+
+```{r skin_pathways_volcano}
+volcano <- skin_volcano +
+  gg_reduce_pathway_text
+
+volcano <- plot_grid( volcano, labels = "a" )
+
+pathways <- plot_grid( skin_down_ggplot + gg_reduce_pathway_text + expand_limits( y = c( 0, 25 ) ),
+                       skin_up_ggplot + gg_reduce_pathway_text + expand_limits( y = c( 0, 25 ) ),
+                       nrow = 2,
+                       rel_heights = c( 1, 3 ),
+                       labels = c( "b", "c" ) )
+
+merged_volcano_y_pathway <- plot_grid( volcano,
+                                       pathways,
+                                       nrow = 1,
+                                       rel_widths = c( 1, 1.5 ) )
+
+merged_volcano_y_pathway
+```
+
+# Session info
+```{r versions}
+Sys.time()
+
+getwd()
+  
+sessionInfo()
+```

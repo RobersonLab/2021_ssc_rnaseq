@@ -1,0 +1,104 @@
+---
+title: "SPAG17 plots"
+author: "Eli"
+date: "November 24, 2020"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+# Setup
+```{r libraries}
+library( here )
+library( tidyverse )
+library( reshape2 )
+```
+
+```{r source_shared}
+source( here::here( 'src', 'shared_project_functions.R' ) )
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = TRUE,
+	message = FALSE,
+	fig.path = paste0( figure_dir, '/' ),
+	fig.keep = 'all',
+	dpi = 300,
+	fig.width = 11,
+	fig.height = 8.5
+)
+```
+
+# Load data
+```{r gene_annotation}
+ensembl <- read_tsv( file = here::here( 'data', 'biomart_gene_transcript_map.txt.gz' ), col_names = TRUE ) %>%
+  dplyr::rename( .data = ., gene_id = `Gene stable ID` ) %>%
+  dplyr::rename( .data = ., symbol = `Gene name` ) %>%
+  dplyr::rename( .data = ., gene_biotype = `Gene type` ) %>%
+  select( .data = ., gene_id, symbol, gene_biotype ) %>%
+  as.data.frame( . ) %>%
+  unique( . )
+
+spag17_id <- ensembl %>%
+  filter( symbol == "SPAG17" ) %>%
+  pull( gene_id )
+```
+
+```{r demographics}
+demographics <- read_csv( file = here( "data", "demographics.csv" ) )
+```
+
+```{r info}
+rgsm <- read_csv( file = here::here( 'data', 'ssc_rnaseq_readgroup_info.csv' ) ) %>%
+  select( .data = ., RGSM, Individual, Status, GenStatus, Tissue, Cohort, Machine, Cycles ) %>%
+  as.data.frame( . ) %>%
+  unique( . )
+```
+
+```{r sample_info}
+info <- merge( x = select( rgsm, RGSM, Individual, Tissue ),
+               y = select( demographics, Individual, Sex, Subtype ), by = "Individual" )
+```
+
+```{r expression}
+expression <- read_csv( file = here( "results", "unspliced_all_sample_rlog.csv.gz" ) ) %>%
+  filter( gene_id == spag17_id ) %>%
+  as.data.frame( . ) %>%
+  column_to_rownames( "gene_id" ) %>%
+  melt( . ) %>%
+  dplyr::rename( RGSM = variable ) %>%
+  dplyr::rename( Expression = value ) %>%
+  merge( x = info, y = ., by = "RGSM" ) %>%
+  filter( Tissue == "Skin" ) %>%
+  mutate( Subtype = as.character( Subtype ) ) %>%
+  mutate( Subtype = case_when(
+    Subtype == "lcSSc" ~ "lc+dcSSc",
+    Subtype == "dcSSc" ~ "lc+dcSSc",
+    TRUE ~ Subtype
+  ) ) %>%
+  mutate( Subtype = factor( Subtype, c( "Control", "VEDOSS", "lc+dcSSc", "SSS" ) ) )
+```
+
+```{r spag17_all_samples}
+ggplot( data = expression, mapping = aes( x = Subtype, y = Expression ) ) +
+  	theme_bw() +
+  	geom_jitter( size = 3, width = 0.125 ) +
+  	xlab( "\nSSc Subtype" ) +
+  	ylab( "Expression (rlog)\n" ) +
+    ggtitle( "SPAG17" ) +
+    theme( plot.title = element_text( face = 'italic' ) ) +
+    gg_bigger_texts +
+  	gg_center_title +
+    expand_limits( y = 0 ) %>%
+    return( . )
+```
+
+# Session info
+```{r versions}
+Sys.time()
+
+getwd()
+  
+sessionInfo()
+```

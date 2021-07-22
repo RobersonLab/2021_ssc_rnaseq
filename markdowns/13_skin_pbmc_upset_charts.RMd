@@ -1,0 +1,169 @@
+---
+title: "PBMC volcano plot combined figures"
+author: "Eli"
+date: "September 18, 2019"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+# Setup
+```{r libraries}
+library( here )
+library( cowplot )
+library( tidyverse )
+library( UpSetR )
+```
+
+```{r source_shared}
+source( here::here( 'src', 'shared_project_functions.R' ) )
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = TRUE,
+	message = FALSE,
+	fig.path = paste0( figure_dir, '/' ),
+	fig.keep = 'all',
+	dpi = 300,
+	fig.width = 11,
+	fig.height = 8.5
+)
+```
+
+# Load data
+```{r gene_annotation}
+ensembl <- read_tsv( file = here::here( 'data', 'biomart_gene_transcript_map.txt.gz' ), col_names = TRUE ) %>%
+  dplyr::rename( .data = ., gene_id = `Gene stable ID` ) %>%
+  dplyr::rename( .data = ., transcript_id = `Transcript stable ID` ) %>%
+  dplyr::rename( .data = ., symbol = `Gene name` ) %>%
+  dplyr::rename( .data = ., gene_biotype = `Gene type` ) %>%
+  dplyr::rename( .data = ., transcript_biotype = `Transcript type` ) %>%
+  select( .data = ., gene_id, symbol, gene_biotype ) %>%
+  as.data.frame( . ) %>%
+  unique( . )
+```
+
+# Load DEGs from unspliced counts
+```{r load_degs_unspliced}
+skin_deg <- read_tsv( file = here::here( "results", "DiffExp_0m_SSc_over_Control_Skin_unspliced.tsv" ))
+
+pbmc_deg <- read_tsv( file = here::here( "results", "DiffExp_0m_SSc_over_Control_PBMC_unspliced.tsv" ))
+```
+
+```{r build_lists_deg}
+skin_up_list <- filter( skin_deg, qval < 0.05 & FoldChange >= 1.5 ) %>%
+  pull( gene_id )
+
+skin_down_list <- filter( skin_deg, qval < 0.05 & FoldChange <= (-1.5) ) %>%
+  pull( gene_id )
+
+pbmc_up_list <- filter( pbmc_deg, qval < 0.05 & FoldChange >= 1.5 ) %>%
+  pull( gene_id )
+
+pbmc_down_list <- filter( pbmc_deg, qval < 0.05 & FoldChange <= (-1.5) ) %>%
+  pull( gene_id )
+```
+
+```{r build_upset_dataframe}
+upset_df <- union( skin_up_list, skin_down_list ) %>%
+  union( ., pbmc_up_list ) %>%
+  union( ., pbmc_down_list ) %>%
+  data.frame( gene_id = . ) %>%
+  mutate( `PBMC - up` = case_when(
+    gene_id %in% pbmc_up_list ~ 1,
+    TRUE ~ 0
+  )) %>%
+  mutate( `PBMC - down` = case_when(
+    gene_id %in% pbmc_down_list ~ 1,
+    TRUE ~ 0
+  )) %>%
+  mutate( `Skin - up` = case_when(
+    gene_id %in% skin_up_list ~ 1,
+    TRUE ~ 0
+  )) %>%
+  mutate( `Skin - down` = case_when(
+    gene_id %in% skin_down_list ~ 1,
+    TRUE ~ 0
+  )) %>%
+  as.data.frame( . )
+
+select( ensembl, gene_id, symbol ) %>%
+  as.data.frame( . ) %>%
+  unique( . ) %>%
+  merge( x = ., y = upset_df, all.y = TRUE, by = "gene_id" ) %>%
+  write_tsv( x = ., path = here::here( "results", "unspliced_upset_dataframe.tsv" ) )
+
+row_counts <- upset_df %>%
+  as.data.frame( . ) %>%
+  column_to_rownames( "gene_id" ) %>%
+  as.matrix( . ) %>%
+  rowSums( . )
+
+overlap_idx <- which( row_counts > 1 )
+
+select( ensembl, gene_id, symbol ) %>%
+  as.data.frame( . ) %>%
+  unique( . ) %>%
+  merge( x = ., y = upset_df[ overlap_idx, ], all.y = TRUE, by = "gene_id" ) %>%
+  arrange( `PBMC - up`, `PBMC - down`, `Skin - up`, `Skin - down` ) %>%
+  write_tsv( x = ., path = here::here( "results", "unspliced_upset_overlaps.tsv" ) )
+```
+
+```{r unspliced_skin_pbmc_upset}
+upset( upset_df, text.scale = c( 2, 2, 1.2, 1.2, 2, 2 ), point.size = 3, nintersects = NA )
+```
+
+```{r print_lists}
+skin_and_pbmc_up <- intersect( skin_up_list, pbmc_up_list )
+skin_and_pbmc_down <- intersect( skin_down_list, pbmc_down_list )
+pbmc_down_skin_up <- intersect( skin_up_list, pbmc_down_list )
+pbmc_up_skin_down <- intersect( pbmc_up_list, skin_down_list )
+
+# skin and pbmc up
+filter( .data = ensembl, gene_id %in% skin_and_pbmc_up ) %>%
+  pull( symbol )
+
+# skin and pbmc down
+filter( .data = ensembl, gene_id %in% skin_and_pbmc_down ) %>%
+  pull( symbol )
+
+# pbmc down and skin up
+filter( .data = ensembl, gene_id %in% pbmc_down_skin_up ) %>%
+  pull( symbol )
+
+# pbmc up and skin down
+filter( .data = ensembl, gene_id %in% pbmc_up_skin_down ) %>%
+  pull( symbol )
+```
+
+```{r table_competing_foldchanges}
+list_disagree_gene_ids <- c( pbmc_up_skin_down, pbmc_down_skin_up )
+list_agree_gene_ids <- c( skin_and_pbmc_down, skin_and_pbmc_up )
+
+skin_deg <- dplyr::rename( skin_deg, `Skin FoldChange` = FoldChange ) %>%
+  dplyr::rename( `Skin qval` = qval ) %>%
+  select( gene_id, symbol, gene_biotype, `Skin FoldChange`, `Skin qval` )
+
+pbmc_deg <- dplyr::rename( pbmc_deg, `PBMC FoldChange` = FoldChange ) %>%
+  dplyr::rename( `PBMC qval` = qval ) %>%
+  select( gene_id, symbol, gene_biotype, `PBMC FoldChange`, `PBMC qval` )
+
+combined_deg <- merge( x = pbmc_deg, y = skin_deg, by = c( 'gene_id', 'symbol', 'gene_biotype' ) ) %>%
+  filter( gene_id %in% c( list_disagree_gene_ids, list_agree_gene_ids ) ) %>%
+  mutate( Direction = case_when(
+    gene_id %in% list_disagree_gene_ids ~ "Discordant",
+    gene_id %in% list_agree_gene_ids ~ "Concordant",
+    TRUE ~ "TROUBLE"
+  ) ) %>%
+  write_tsv( x = ., path = here::here( "results", "DiffExp_0m_SSc_over_Control_concordance.tsv" ) )
+```
+
+# Session info
+```{r versions}
+Sys.time()
+
+getwd()
+  
+sessionInfo()
+```

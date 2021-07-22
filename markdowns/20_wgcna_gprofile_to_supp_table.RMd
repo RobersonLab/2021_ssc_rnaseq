@@ -1,0 +1,68 @@
+---
+title: "Parsing WGCNA gProfileR output to a parsed table"
+author: "Eli"
+date: "November 24, 2020"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+# Setup
+```{r libraries}
+library( here )
+library( tidyverse )
+library( UpSetR )
+```
+
+```{r source_shared}
+source( here::here( 'src', 'shared_project_functions.R' ) )
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = TRUE,
+	message = FALSE,
+	fig.path = paste0( figure_dir, '/' ),
+	fig.keep = 'all',
+	dpi = 300,
+	fig.width = 11,
+	fig.height = 8.5
+)
+```
+
+```{r gene_annotation}
+ensembl <- read_tsv( file = here::here( 'data', 'biomart_gene_transcript_map.txt.gz' ), col_names = TRUE ) %>%
+  dplyr::rename( .data = ., gene_id = `Gene stable ID` ) %>%
+  dplyr::rename( .data = ., symbol = `Gene name` ) %>%
+  dplyr::rename( .data = ., gene_biotype = `Gene type` ) %>%
+  select( .data = ., gene_id, symbol, gene_biotype ) %>%
+  as.data.frame( . ) %>%
+  unique( . )
+rownames( ensembl ) = ensembl$gene_id
+```
+
+```{r parse_tables}
+dir_path <- here( "results", "gprofiler_results" )
+
+files_to_process <- dir( path = dir_path, pattern = "^WGCNA_.+.csv$" )
+
+files_to_process
+
+for ( idx in 1:length( files_to_process ) ) {
+  curr_file <- files_to_process[ idx ] 
+  curr_path <- file.path( dir_path, curr_file )
+  
+  parse_raw_gprofile( gprof_file_path = curr_path, symbol_df = ensembl )
+}
+```
+
+Processed `r length( files_to_process )`
+
+# Session info
+```{r versions}
+Sys.time()
+
+getwd()
+  
+sessionInfo()
+```

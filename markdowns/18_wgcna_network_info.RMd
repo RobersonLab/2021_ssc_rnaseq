@@ -1,0 +1,242 @@
+---
+title: "WGCNA - get network infomation and parse"
+author: "Eli"
+date: "September 18, 2019"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+# Setup
+```{r libraries}
+library( here )
+library( tidyverse )
+```
+
+```{r source_shared}
+source( here::here( 'src', 'shared_project_functions.R' ) )
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = TRUE,
+	message = FALSE,
+	fig.path = paste0( figure_dir, '/' ),
+	fig.keep = 'all',
+	dpi = 300,
+	fig.width = 11,
+	fig.height = 8.5
+)
+```
+
+# Load data
+```{r gene_annotation}
+ensembl <- read_tsv( file = here::here( 'data', 'biomart_gene_transcript_map.txt.gz' ), col_names = TRUE ) %>%
+  dplyr::rename( .data = ., gene_id = `Gene stable ID` ) %>%
+  dplyr::rename( .data = ., symbol = `Gene name` ) %>%
+  dplyr::rename( .data = ., gene_biotype = `Gene type` ) %>%
+  select( .data = ., gene_id, symbol, gene_biotype ) %>%
+  as.data.frame( . ) %>%
+  unique( . )
+```
+
+```{r placeholderframe}
+output <- data.frame()
+```
+
+# PBMC WGCNA
+```{r pbmc_dlco}
+pbmc_dlco <- read_tsv( file = here::here( "results", "wgcna" , "PBMC_unspliced_WGCNA_table_DLCO_perc_pred.tsv" ) ) %>%
+  filter( p.GS.Status < 0.05 ) %>%
+  select( gene_id:p.GS.Status ) %>%
+  mutate( direction = case_when(
+    GS.corr.Status < 0.0 ~ "Negative",
+    GS.corr.Status > 0.0 ~ "Positive",
+    TRUE ~ "Problem"
+  ) )
+
+with( pbmc_dlco, table( moduleColor, direction ) )
+
+pbmc_dlco %>%
+  pull( moduleColor ) %>%
+  unique( . ) %>%
+  length( . )
+
+with( pbmc_dlco, table( direction ) )
+
+pbmc_dlco %>%
+  pull( moduleColor ) %>%
+  length( . )
+
+output <- with( pbmc_dlco, table( direction ) ) %>%
+  as.data.frame( . ) %>%
+  mutate( Tissue = "PBMC" ) %>%
+  mutate( Severity = "DLCO" ) %>%
+  rbind( output, . )
+```
+
+```{r pbmc_forearm_mrss}
+pbmc_forearm_mrss <- read_tsv( file = here::here( "results", "wgcna" , "PBMC_unspliced_WGCNA_table_Forearm_MRSS.tsv" ) ) %>%
+  filter( p.GS.Status < 0.05 ) %>%
+  select( gene_id:p.GS.Status ) %>%
+  mutate( direction = case_when(
+    GS.corr.Status < 0.0 ~ "Negative",
+    GS.corr.Status > 0.0 ~ "Positive",
+    TRUE ~ "Problem"
+  ) )
+
+with( pbmc_forearm_mrss, table( moduleColor, direction ) )
+
+pbmc_forearm_mrss %>%
+  pull( moduleColor ) %>%
+  unique( . ) %>%
+  length( . )
+
+with( pbmc_forearm_mrss, table( direction ) )
+
+pbmc_forearm_mrss %>%
+  pull( moduleColor ) %>%
+  length( . )
+
+output <- with( pbmc_forearm_mrss, table( direction ) ) %>%
+  as.data.frame( . ) %>%
+  mutate( Tissue = "PBMC" ) %>%
+  mutate( Severity = "Forearm MRSS" ) %>%
+  rbind( output, . )
+```
+
+```{r pbmc_mrss}
+pbmc_mrss <- read_tsv( file = here::here( "results", "wgcna" , "PBMC_unspliced_WGCNA_table_MRSS.tsv" ) ) %>%
+  filter( p.GS.Status < 0.05 ) %>%
+  select( gene_id:p.GS.Status ) %>%
+  mutate( direction = case_when(
+    GS.corr.Status < 0.0 ~ "Negative",
+    GS.corr.Status > 0.0 ~ "Positive",
+    TRUE ~ "Problem"
+  ) )
+
+with( pbmc_mrss, table( moduleColor, direction ) )
+
+pbmc_mrss %>%
+  pull( moduleColor ) %>%
+  unique( . ) %>%
+  length( . )
+
+with( pbmc_mrss, table( direction ) )
+
+pbmc_mrss %>%
+  pull( moduleColor ) %>%
+  length( . )
+
+output <- with( pbmc_mrss, table( direction ) ) %>%
+  as.data.frame( . ) %>%
+  mutate( Tissue = "PBMC" ) %>%
+  mutate( Severity = "Total MRSS" ) %>%
+  rbind( output, . )
+```
+
+# Skin WGCNA
+```{r skin_dlco}
+skin_dlco <- read_tsv( file = here::here( "results", "wgcna" , "Skin_unspliced_WGCNA_table_DLCO_perc_pred.tsv" ) ) %>%
+  filter( p.GS.Status < 0.05 ) %>%
+  select( gene_id:p.GS.Status ) %>%
+  mutate( direction = case_when(
+    GS.corr.Status < 0.0 ~ "Negative",
+    GS.corr.Status > 0.0 ~ "Positive",
+    TRUE ~ "Problem"
+  ) )
+
+with( skin_dlco, table( moduleColor, direction ) )
+
+skin_dlco %>%
+  pull( moduleColor ) %>%
+  unique( . ) %>%
+  length( . )
+
+with( skin_dlco, table( direction ) )
+
+skin_dlco %>%
+  pull( moduleColor ) %>%
+  length( . )
+
+output <- with( skin_dlco, table( direction ) ) %>%
+  as.data.frame( . ) %>%
+  mutate( Tissue = "Skin" ) %>%
+  mutate( Severity = "DLCO" ) %>%
+  rbind( output, . )
+```
+
+```{r skin_fvc}
+skin_fvc <- read_tsv( file = here::here( "results", "wgcna" , "Skin_unspliced_WGCNA_table_FVC_perc_pred.tsv" ) ) %>%
+  filter( p.GS.Status < 0.05 ) %>%
+  select( gene_id:p.GS.Status ) %>%
+  mutate( direction = case_when(
+    GS.corr.Status < 0.0 ~ "Negative",
+    GS.corr.Status > 0.0 ~ "Positive",
+    TRUE ~ "Problem"
+  ) )
+
+with( skin_fvc, table( moduleColor, direction ) )
+
+skin_fvc %>%
+  pull( moduleColor ) %>%
+  unique( . ) %>%
+  length( . )
+
+with( skin_fvc, table( direction ) )
+
+skin_fvc %>%
+  pull( moduleColor ) %>%
+  length( . )
+
+output <- with( skin_fvc, table( direction ) ) %>%
+  as.data.frame( . ) %>%
+  mutate( Tissue = "Skin" ) %>%
+  mutate( Severity = "FVC" ) %>%
+  rbind( output, . )
+```
+
+```{r skin_mrss}
+skin_mrss <- read_tsv( file = here::here( "results", "wgcna" , "Skin_unspliced_WGCNA_table_MRSS.tsv" ) ) %>%
+  filter( p.GS.Status < 0.05 ) %>%
+  select( gene_id:p.GS.Status ) %>%
+  mutate( direction = case_when(
+    GS.corr.Status < 0.0 ~ "Negative",
+    GS.corr.Status > 0.0 ~ "Positive",
+    TRUE ~ "Problem"
+  ) )
+
+with( skin_mrss, table( moduleColor, direction ) )
+
+skin_mrss %>%
+  pull( moduleColor ) %>%
+  unique( . ) %>%
+  length( . )
+
+with( skin_mrss, table( direction ) )
+
+skin_mrss %>%
+  pull( moduleColor ) %>%
+  length( . )
+
+output <- with( skin_mrss, table( direction ) ) %>%
+  as.data.frame( . ) %>%
+  mutate( Tissue = "Skin" ) %>%
+  mutate( Severity = "Total MRSS" ) %>%
+  rbind( output, . )
+```
+
+```{r write_summary}
+output %>%
+  pivot_wider( id_cols = c( "Tissue", "Severity" ), names_from = "direction", values_from = "Freq" ) %>%
+  write_tsv( x = ., path = here::here( "results", "network_correlation_summary.tsv" ) )
+```
+
+# Session info
+```{r versions}
+Sys.time()
+
+getwd()
+  
+sessionInfo()
+```

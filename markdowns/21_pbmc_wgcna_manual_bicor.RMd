@@ -1,0 +1,199 @@
+---
+title: "Midweight bicorrelation - correlated genes"
+author: "Eli"
+date: "November 27, 2020"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+# Setup
+```{r libraries}
+library( here )
+library( reshape2 )
+library( tidyverse )
+library( WGCNA )
+```
+
+```{r source_shared}
+source( here::here( 'src', 'shared_project_functions.R' ) )
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = TRUE,
+	message = FALSE,
+	fig.path = paste0( figure_dir, '/' ),
+	fig.keep = 'all',
+	dpi = 300,
+	fig.width = 11,
+	fig.height = 8.5
+)
+```
+
+```{r constants}
+tissue_of_interest <- "PBMC"
+variance_quantile <- 0.10
+min_correlation <- 0.80
+```
+
+```{r gene_annotation}
+ensembl <- read_tsv( file = here::here( 'data', 'biomart_gene_transcript_map.txt.gz' ), col_names = TRUE ) %>%
+  dplyr::rename( .data = ., gene_id = `Gene stable ID` ) %>%
+  dplyr::rename( .data = ., symbol = `Gene name` ) %>%
+  dplyr::rename( .data = ., gene_biotype = `Gene type` ) %>%
+  select( .data = ., gene_id, symbol, gene_biotype ) %>%
+  as.data.frame( . ) %>%
+  unique( . )
+rownames( ensembl ) = ensembl$gene_id
+
+ensembl_ids <- pull( ensembl, gene_id )
+```
+
+```{r correlated_ids}
+# DLCO
+dlco_id <- read_tsv( file = here( 'results', 'wgcna', 'PBMC_unspliced_WGCNA_table_DLCO_perc_pred.tsv' ) ) %>%
+  filter( p.GS.Status < 0.05 ) %>%
+  select( gene_id ) %>%
+  mutate( TmpTrait = "DLCO" )
+
+# Forearm MRSS
+forearm_id <- read_tsv( file = here( 'results', 'wgcna', 'PBMC_unspliced_WGCNA_table_Forearm_MRSS.tsv' ) ) %>%
+  filter( p.GS.Status < 0.05 ) %>%
+  select( gene_id ) %>%
+  mutate( TmpTrait = "Forearm MRSS" )
+
+# Total MRSS
+totalmrss_id <- read_tsv( file = here( 'results', 'wgcna', 'PBMC_unspliced_WGCNA_table_MRSS.tsv' ) ) %>%
+  filter( p.GS.Status < 0.05 ) %>%
+  select( gene_id ) %>%
+  mutate( TmpTrait = "Total MRSS" )
+
+# Merged
+merged_ids <- rbind( dlco_id, forearm_id ) %>%
+  rbind( ., totalmrss_id ) %>%
+  filter( gene_id %in% ensembl_ids ) %>%
+  dplyr::group_by( gene_id ) %>%
+  summarise( Trait = paste( sort( TmpTrait ), collapse = ";"),
+             TraitCount = length( TmpTrait )
+  )
+
+correlated_gene_ids <- pull( merged_ids, gene_id )
+```
+
+# read expression and samples
+```{r read_expression}
+demographics <- read_csv( here::here( "data", "demographics.csv" ) ) %>%
+  filter( GenStatus == "SSc" ) %>%
+  select( Individual, Subtype )
+
+# load MRSS
+mrss_full <- read_csv( file = here::here( 'data', 'bmi_mrss_meds.csv' ) ) %>%
+  filter( Individual %in% demographics$Individual ) %>%
+  mutate( .data = ., uid = paste0( Individual, "_", Timepoint ) ) %>%
+  select( .data = ., uid, MRSS, Forearm_MRSS )
+
+# lung function
+lung_full <- read_csv( file = here::here( 'data', 'lung_fxn.csv' ) ) %>%
+  filter( Individual %in% demographics$Individual ) %>%
+  mutate( uid = paste0( Individual, "_", Timepoint ) ) %>%
+  select( uid, FVC_perc_pred, DLCO_perc_pred )
+
+# merge phenotypes
+mrss <- merge( mrss_full, lung_full, by = 'uid', all = TRUE ) %>%
+  as.data.frame( x = . ) %>%
+  column_to_rownames( .data = ., var = 'uid' )
+
+# load regularized logarithm of the data
+temp_expression <- read_csv(
+  file = here::here( 'results', 'unspliced_wgcna_vst_combat_adjusted.csv.gz' ),
+  col_names = TRUE,
+  col_types = cols( .default = col_double(), gene_id = col_character() ) ) %>%
+  filter( gene_id %in% correlated_gene_ids )
+
+keep_col_index <- grep( tissue_of_interest, colnames( temp_expression ) )
+keep_col_index <- c( keep_col_index, grep( "gene_id", colnames( temp_expression ) ) )
+
+transposed_expression <- temp_expression[ , keep_col_index ] %>%
+  as.data.frame( . ) %>%
+  filter( gene_id %in% ensembl_ids ) %>%
+  column_to_rownames( "gene_id" ) %>%
+  as.matrix( x = . ) %>%
+  t( x = . )
+
+rm( temp_expression )
+
+rownames( transposed_expression ) <- rownames( transposed_expression ) %>%
+  str_replace(
+    string = .,
+    pattern = paste0( "_", tissue_of_interest ),
+    replacement = "" ) %>%
+  str_replace( string = ., pattern = "_Control", replacement = "" ) %>%
+  str_replace( string = ., pattern = "_SSc", replacement = "" )
+
+keep_names <- intersect( rownames( transposed_expression ), rownames( mrss ) ) %>%
+  sort( . )
+
+mrss <- mrss[ keep_names, ]
+transposed_expression <- transposed_expression[ keep_names, ]
+
+# We've taken this down to just the samples we want to test
+# but we can remove uninformative genes and perhaps have better results
+variances <- apply( X = transposed_expression, MARGIN = 2, var, na.rm = TRUE )
+variance_cutoff <- quantile( variances, variance_quantile ) %>% unname( . )
+remove_column_index <- which( variances < variance_cutoff )
+
+transposed_expression <- transposed_expression[ , -c( remove_column_index ) ]
+
+rm( mrss )
+```
+
+```{r melted_bicor}
+temp <- bicor( transposed_expression, maxPOutliers = 0.05 )
+temp[ upper.tri( temp ) ] = NA
+
+melted_bicor <- temp %>%
+  melt( . ) %>%
+  filter( abs( value ) >= min_correlation ) %>%
+  filter( Var1 != Var2 ) %>%
+  dplyr::rename( Source = Var1 ) %>%
+  dplyr::rename( Target = Var2 ) %>%
+  dplyr::rename( Correlation = value ) %>%
+  mutate( CorrType = case_when(
+    Correlation > 0 ~ "Positive",
+    Correlation < 0 ~ "Negative",
+    TRUE ~ "TROUBLE"
+  )) %>%
+  select( Source, Target, Correlation, CorrType ) %>%
+  write_csv( x = ., path = here( 'results', paste0( tissue_of_interest, '_bicor_network_edges_traitsonly.csv' ) ) )
+
+trait_only_ids <- union( x = melted_bicor$Source, y = melted_bicor$Source )
+```
+
+```{r nodes}
+# node_info <- 
+union( x = melted_bicor$Source, y = melted_bicor$Target ) %>%
+  data.frame( gene_id = . ) %>%
+  merge( x = merged_ids, y = ., by = "gene_id" ) %>%
+  mutate( Trait = case_when(
+    is.na( Trait ) ~ "None",
+    TRUE ~ Trait
+  ) ) %>%
+  mutate( TraitCount = as.integer( TraitCount) ) %>%
+  mutate( TraitCount = case_when(
+    is.na( TraitCount ) ~ as.integer( 0 ),
+    TRUE ~ TraitCount
+  )) %>%
+  merge( x = ensembl, y = ., by = "gene_id" ) %>%
+  dplyr::rename( Id = gene_id ) %>%
+  write_csv( x = ., path = here( 'results', paste0( tissue_of_interest, '_bicor_network_nodes_traitsonly.csv' ) ) )
+```
+
+# Session info
+```{r versions}
+Sys.time()
+
+getwd()
+  
+sessionInfo()
+```

@@ -1,0 +1,201 @@
+---
+title: "Differential expression unspliced -- tissue / sex"
+author: "Eli"
+date: "April 03, 2019"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r libraries}
+library( here )
+library( tidyverse )
+library( DESeq2 )
+```
+
+```{r setup_parallel_execution}
+RUN_IN_PARALLEL = TRUE
+PARALLEL_THREADS = 10
+
+# ATTN VERY IMPORTANT WARNING
+# I was running this either on Windows 10
+# or Linux. If you're using something else
+# you will likely need to either change
+# this logic or disable parallel
+# operation.
+
+if ( RUN_IN_PARALLEL & .Platform$OS.type == "windows" ) {
+  library( doSNOW )
+  local_cluster <- makeCluster( PARALLEL_THREADS )
+  registerDoSNOW( local_cluster )
+} else if ( RUN_IN_PARALLEL & .Platform$OS.type == "unix" ) {
+  library( doMC )
+  registerDoMC( PARALLEL_THREADS )
+}
+```
+
+```{r source_shared}
+source( here::here( 'src', 'shared_project_functions.R' ) )
+```
+
+```{r useful_constants}
+count_type <- 'unspliced'
+```
+
+```{r gene_annotation}
+ensembl <- read_tsv( file = here::here( 'data', 'biomart_gene_transcript_map.txt.gz' ), col_names = TRUE ) %>%
+  dplyr::rename( .data = ., gene_id = `Gene stable ID` ) %>%
+  dplyr::rename( .data = ., transcript_id = `Transcript stable ID` ) %>%
+  dplyr::rename( .data = ., symbol = `Gene name` ) %>%
+  dplyr::rename( .data = ., gene_biotype = `Gene type` ) %>%
+  dplyr::rename( .data = ., transcript_biotype = `Transcript type` ) %>%
+  select( .data = ., gene_id, symbol, gene_biotype ) %>%
+  as.data.frame( . ) %>%
+  unique( . )
+```
+
+```{r rgsm}
+demographics <- read_csv( file = here::here( 'data', 'demographics.csv' ) ) %>%
+  filter( .data = ., Subtype %in% c( 'Control', 'lcSSc', 'dcSSc' ) ) %>%
+  select( .data = ., Individual, Subtype, Sex )
+
+rgsm <- read_csv( file = here::here( 'data', 'ssc_rnaseq_readgroup_info.csv' ) ) %>%
+  select( .data = ., RGSM, Individual, Status, GenStatus, Tissue, Cohort, Machine, Cycles, Timepoint ) %>%
+  as.data.frame( . ) %>%
+  unique( . ) %>%
+  merge( x = ., y = demographics, by = "Individual" ) %>%
+  mutate( .data = ., Status = paste0( Tissue, "_", Sex ) ) %>%
+  mutate( .data = ., Machine = paste0( Machine, "_", GenStatus ) )
+
+rgsm_list <- rgsm %>%
+  pull( RGSM ) %>%
+  sort( . ) %>%
+  unique( . )
+```
+
+## genes
+```{r design}
+design_tbl <- rgsm %>%
+  select( .data = ., RGSM, Status, Tissue, Machine ) %>%
+  as.data.frame( . )
+rownames( design_tbl ) = design_tbl$RGSM
+
+# design table status counts
+with( design_tbl, table( Status ) )
+```
+
+```{r read_gene_counts_genes}
+gene_counts <- read_tsv( file = here::here( 'results', paste0( count_type, '_featurecounts.tsv.gz' ) ), col_types = cols( .default = col_integer(), gene_id = col_character() ) ) %>%
+  as.data.frame( . ) %>%
+  column_to_rownames( "gene_id" ) %>%
+  as.matrix( . )
+
+both_ids <- intersect( rownames( design_tbl ), colnames( gene_counts ) )
+design_tbl <- design_tbl[ both_ids, ]
+gene_counts <- gene_counts[ ,both_ids ]
+
+# status counts again in case some were dropped
+with( design_tbl, table( Status, Machine ) )
+```
+
+# Sex differential expression
+
+```{r do_some_prefiltering_sex}
+detection_status <- apply( X = gene_counts, MARGIN = 1, FUN = detect, cutoff = min_reads_detection_threshold )
+detection_idx <- which( detection_status >= min_detected_samples_for_de )
+
+gene_counts <- gene_counts[ detection_idx, ]
+```
+
+```{r load_into_deseq2_genes_sex}
+deseqObj <- DESeqDataSetFromMatrix( countData = gene_counts, colData = design_tbl, design = ~ Machine + Status )
+
+deseqObj <- DESeq( deseqObj, test = "Wald", betaPrior = FALSE, parallel = RUN_IN_PARALLEL )
+```
+
+## PBMC
+```{r pbmc_sex}
+tissue <- 'PBMC'
+control_status <- paste0( tissue, "_F" )
+case_status <- paste0( tissue, "_M" )
+de_file <- here::here( 'results', paste0( 'DiffExp_0m_', tissue, '_Sex_', count_type, ".tsv" ) )
+
+de_results <- results( deseqObj, contrast = c( "Status", case_status, control_status ) ) %>%
+	format_deseq_results( ., ensembl ) %>%
+  write_tsv( x = ., path = de_file )
+
+summarize_pretty_de_results( de_results, fc_cutoff = 1.5 )
+```
+
+## Skin
+```{r skin_sex}
+tissue <- 'Skin'
+control_status <- paste0( tissue, "_F" )
+case_status <- paste0( tissue, "_M" )
+de_file <- here::here( 'results', paste0( 'DiffExp_0m_', tissue, '_Sex_', count_type, ".tsv" ) )
+
+de_results <- results( deseqObj, contrast = c( "Status", case_status, control_status ) ) %>%
+	format_deseq_results( ., ensembl ) %>%
+  write_tsv( x = ., path = de_file )
+
+summarize_pretty_de_results( de_results, fc_cutoff = 1.5 )
+```
+
+# Tissue differential expression
+```{r update_design_table}
+rgsm <- read_csv( file = here::here( 'data', 'ssc_rnaseq_readgroup_info.csv' ) ) %>%
+  select( .data = ., RGSM, Individual, Status, GenStatus, Tissue, Cohort, Machine, Cycles, Timepoint ) %>%
+  as.data.frame( . ) %>%
+  unique( . ) %>%
+  merge( x = ., y = demographics, by = "Individual" )
+
+design_tbl <- rgsm %>%
+  select( .data = ., RGSM, Status, Tissue, Machine, Sex ) %>%
+  mutate( .data = ., AdjFactor = case_when(
+    str_detect( string = RGSM, pattern = "SSc" ) ~ "SSc",
+    str_detect( string = RGSM, pattern = "Control" ) ~ "Control",
+    TRUE ~ NA_character_
+  ) ) %>%
+  mutate( .data = ., AdjFactor = paste0( AdjFactor, "_", Machine ) ) %>%
+  mutate( .data = ., Status = Tissue ) %>%
+  as.data.frame( . )
+rownames( design_tbl ) = design_tbl$RGSM
+
+# design table status counts
+with( design_tbl, table( Status, AdjFactor ) )
+```
+
+```{r load_into_deseq2_genes_tissue}
+deseqObj <- DESeqDataSetFromMatrix( countData = gene_counts, colData = design_tbl, design = ~ AdjFactor + Status )
+
+deseqObj <- DESeq( deseqObj, test = "Wald", betaPrior = FALSE, parallel = RUN_IN_PARALLEL )
+```
+
+## Tissue DEG
+```{r pbmc_tissue}
+tissue <- 'Tissue'
+control_status <- "PBMC"
+case_status <- "Skin"
+de_file <- here::here( 'results', paste0( 'DiffExp_0m_Tissue_', count_type, ".tsv" ) )
+
+de_results <- results( deseqObj, contrast = c( "Status", case_status, control_status ) ) %>%
+	format_deseq_results( ., ensembl ) %>%
+  write_tsv( x = ., path = de_file )
+
+summarize_pretty_de_results( de_results, fc_cutoff = 1.5 )
+```
+
+```{r cleanup_parallel_executuion}
+if ( RUN_IN_PARALLEL & .Platform$OS.type == "windows" ) {
+  stopCluster( local_cluster )
+} 
+```
+
+# Session info
+```{r versions}
+Sys.time()
+
+getwd()
+  
+sessionInfo()
+```

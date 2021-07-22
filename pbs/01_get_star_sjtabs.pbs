@@ -1,0 +1,50 @@
+#PBS -S /bin/bash
+#PBS -l nodes=1:ppn=4
+#PBS -l mem=40g
+#PBS -l walltime=23:59:00
+
+###############################
+# Move to execution directory #
+###############################
+cd $PBS_O_WORKDIR
+
+################################
+# source environment variables #
+################################
+source environment_variables.sh
+
+#####################
+# setup directories #
+#####################
+mkdir -p $STAR_DIR
+mkdir -p $SJ_TAB_DIR
+
+#################
+# run variables #
+#################
+BASE=`bin/getline.py $FASTQ_BASE_NAMES $PBS_ARRAYID`
+
+FQ1=${CLEAN_FASTQ_DIR}/${BASE}_1_clean.${FASTQ_EXT}
+FQ2=${CLEAN_FASTQ_DIR}/${BASE}_2_clean.${FASTQ_EXT}
+
+################
+# align y gzip #
+################
+mkdir -p ${STAR_DIR}/${BASE} && \
+STAR --runMode alignReads \
+--genomeDir $STAR_REF \
+--runThreadN $PBS_NUM_PPN \
+--readFilesCommand zcat \
+--outFilterScoreMinOverLread $STAR_OUT_FILTER \
+--outFilterMatchNminOverLread $STAR_OUT_FILTER \
+--outFilterMultimapNmax $STAR_MULTIMAP_MAX \
+--outSAMtype BAM Unsorted \
+--outFileNamePrefix ${STAR_DIR}/${BASE}/ \
+--outReadsUnmapped Fastx \
+--readFilesIn $FQ1 $FQ2 \
+1>logs/${BASE}_star_sjtabs.log 2>&1
+
+mv ${STAR_DIR}/${BASE}/SJ.out.tab ${SJ_TAB_DIR}/${BASE}_SJ.out.tab && \
+pigz --best -p $PBS_NUM_PPN ${SJ_TAB_DIR}/${BASE}_SJ.out.tab && \
+rm -fr ${STAR_DIR}/${BASE}/
+

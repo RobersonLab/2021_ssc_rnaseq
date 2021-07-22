@@ -1,0 +1,177 @@
+---
+title: "Case Demographics"
+author: "Eli Roberson"
+date: "August 07, 2019"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r libraries}
+library( here )
+library( knitr )
+library( tidyverse )
+```
+
+```{r source_shared}
+source( here::here( 'src', 'shared_project_functions.R' ) )
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = TRUE,
+	message = FALSE,
+	fig.path = paste0( figure_dir, '/' ),
+	fig.keep = 'all',
+	dpi = 300,
+	fig.width = 11,
+	fig.height = 8.5
+)
+```
+
+```{r read_and_filter}
+demographics <- read_csv( file = here::here( "data/demographics.csv" ) ) %>%
+  filter( .data = ., Subtype %in% c( 'lcSSc', 'dcSSc' ) ) %>%
+  mutate( GenStatus = Subtype ) %>%
+  mutate( immunofluorescence = case_when(
+      is.na( ANA_centromere ) ~ "No",
+      is.na( ANA_homogeneous ) ~ "No",
+      is.na( ANA_nucleolar ) ~ "No",
+      is.na( ANA_speckled ) ~ "No",
+      TRUE ~ "Yes"
+  ))
+```
+
+```{r generate_demos}
+n <- dplyr::group_by( .data = demographics, GenStatus ) %>%
+  dplyr::summarise( .data = ., n = n() )
+
+if_n <- filter( .data = demographics, immunofluorescence == 'Yes' ) %>%
+  dplyr::group_by( .data = ., GenStatus ) %>%
+  dplyr::summarise(
+    immuno_n = n()
+  )
+
+sex <- filter( .data = demographics, Sex == "F" ) %>%
+  dplyr::group_by( .data = ., GenStatus ) %>%
+  dplyr::summarise( .data = ., Female = n() )
+
+duration <- dplyr::group_by( .data = demographics, GenStatus ) %>%
+  dplyr::summarise( .data = .,
+                    mean_duration = mean( Disease_duration_at_enrollment ),
+                    sd_duration = sd( Disease_duration_at_enrollment ) )
+
+age <- dplyr::group_by( .data = demographics, GenStatus ) %>%
+  dplyr::summarise( .data = .,
+                    mean_age = mean( Enrollment_age ),
+                    sd_age   = sd( Enrollment_age ) )
+
+ethnicity <- with( demographics, table( GenStatus, Ethnicity ) )
+
+if_pattern <- dplyr::group_by( .data = demographics, GenStatus ) %>%
+  dplyr::summarise(
+    centromere_pattern = sum( ANA_centromere, na.rm = TRUE ),
+    homogeneous_pattern = sum( ANA_homogeneous, na.rm = TRUE ),
+    nucleolar_pattern = sum( ANA_nucleolar, na.rm = TRUE ),
+    speckled_pattern = sum( ANA_speckled, na.rm = TRUE )
+  )
+```
+
+```{r demographics_stats}
+age_ttest <- with( demographics, t.test( Enrollment_age ~ GenStatus ) )$p.value
+
+duration_ttest <- with( demographics, t.test( Disease_duration_at_enrollment ~ GenStatus ) )$p.value
+
+ethnicity_fisher_test <- ethnicity %>%
+  fisher.test( . ) %>%
+  unlist( . ) %>%
+  .[ 'p.value' ] %>%
+  unname( . ) %>%
+  as.double( . )
+
+if_pattern_test <- if_pattern %>%
+  column_to_rownames( .data = ., "GenStatus" ) %>%
+  fisher.test( . ) %>%
+  unlist( . ) %>%
+  .[ 'p.value' ] %>%
+  unname( . ) %>%
+  as.double( . )
+
+sex_fisher_test <- with( demographics, table( GenStatus, Sex ) ) %>%
+  fisher.test( . ) %>%
+  unlist( . ) %>%
+  .[ 'p.value' ] %>%
+  unname( . ) %>%
+  as.double( . )
+```
+
+```{r output}
+ethnicity_df <- as.data.frame( ethnicity ) %>%
+  spread( data = ., key = Ethnicity, value = Freq )
+
+ethnicity_list <- c( 'A', 'B', 'H', 'W' )
+
+for ( idx in 1:length( ethnicity_list ) ) {
+  current_name <- ethnicity_list[ idx ]
+  column_count <- dim( ethnicity_df )[2]
+  row_count <- dim( ethnicity_df )[1]
+  
+  if ( current_name %in% colnames( ethnicity_df ) ) {
+    next
+  }
+  
+  ethnicity_df <- cbind( ethnicity_df, rep( 0, row_count ) )
+  colnames( ethnicity_df )[ dim( ethnicity_df )[2] ] = ethnicity_list[ idx ]
+}
+
+out_table <- merge( n, age ) %>%
+  merge( ., duration ) %>%
+  merge( ., sex ) %>%
+  merge( ., if_n ) %>%
+  merge( ., if_pattern ) %>%
+  merge( ethnicity_df ) %>%
+  rbind( NA ) %>%
+  mutate( title = paste0( GenStatus, " (n=", n, ")" ) ) %>%
+  mutate( `Age mean (SD)` = case_when(
+    is.na( mean_age ) ~ sprintf( "%.2e", age_ttest ),
+    TRUE ~ mean_sd_string( mean_age, sd_age )
+  ) ) %>%
+  mutate( `F (%)` = case_when(
+    is.na( Female ) ~ sprintf( "%.2e", sex_fisher_test ),
+    TRUE ~ n_plus_percent_string( Female, n )
+  ) ) %>%
+  mutate( `Mean duration, months (SD)` = case_when(
+    is.na( mean_age ) ~ sprintf( "%.2e", duration_ttest ),
+    TRUE ~ mean_sd_string( mean_duration, sd_duration )
+  ) ) %>%
+  mutate( `Deaths (%)` = NA ) %>%
+  mutate( Ethnicity = case_when(
+    is.na( mean_age ) ~ sprintf( "%.2e", ethnicity_fisher_test ),
+    TRUE ~ NA_character_
+  ) ) %>%
+  mutate( Asian = n_plus_percent_string( A, n ) ) %>%
+  mutate( Black = n_plus_percent_string( B, n ) ) %>%
+  mutate( Hispanic = n_plus_percent_string( H, n ) ) %>%
+  mutate( White = n_plus_percent_string( W, n ) ) %>%
+  mutate( Immunofluorescence = case_when(
+    is.na( mean_age ) ~ sprintf( "%.2e", if_pattern_test ),
+    TRUE ~ NA_character_
+  ) ) %>%
+  mutate( Centromere = n_plus_percent_string( centromere_pattern, immuno_n ) ) %>%
+  mutate( Homogeneous = n_plus_percent_string( homogeneous_pattern, immuno_n ) ) %>%
+  mutate( Nucleolar = n_plus_percent_string( nucleolar_pattern, immuno_n ) ) %>%
+  mutate( Speckled = n_plus_percent_string( speckled_pattern, immuno_n ) )
+
+select( out_table, title, `Age mean (SD)`, `F (%)`, `Mean duration, months (SD)`, `Deaths (%)`, Ethnicity, Asian, Black, Hispanic, White, Immunofluorescence, Centromere, Homogeneous, Nucleolar, Speckled  ) %>%
+  t( . ) %>%
+  kable( . )
+```
+
+# Session info
+```{r versions}
+Sys.time()
+
+getwd()
+  
+sessionInfo()
+```

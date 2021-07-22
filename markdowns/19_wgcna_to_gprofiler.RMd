@@ -1,0 +1,130 @@
+---
+title: "Parsing WGCNA to gProfileR input"
+author: "Eli"
+date: "November 24, 2020"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+# Setup
+```{r libraries}
+library( here )
+library( tidyverse )
+library( UpSetR )
+```
+
+```{r source_shared}
+source( here::here( 'src', 'shared_project_functions.R' ) )
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = TRUE,
+	message = FALSE,
+	fig.path = paste0( figure_dir, '/' ),
+	fig.keep = 'all',
+	dpi = 300,
+	fig.width = 11,
+	fig.height = 8.5
+)
+```
+
+# PBMC WGCNA
+```{r parse_pbmc}
+# dlco
+pbmc_dlco <- read_tsv( file = here::here( "results", "wgcna" , "PBMC_unspliced_WGCNA_table_DLCO_perc_pred.tsv" ) ) %>%
+  filter( p.GS.Status < 0.05 )
+
+pbmc_dlco %>%
+  filter( GS.corr.Status > 0.0 ) %>%
+  select( gene_id ) %>%
+  write_tsv( x = ., path = here( "results", "WGCNA_PBMC_DLCO_Up_gprofile_input.tsv" ), col_names = FALSE )
+
+pbmc_dlco %>%
+  filter( GS.corr.Status < 0.0 ) %>%
+  select( gene_id ) %>%
+  write_tsv( x = ., path = here( "results", "WGCNA_PBMC_DLCO_Down_gprofile_input.tsv" ), col_names = FALSE )
+
+# forearm mrss
+pbmc_forearm_mrss <- read_tsv( file = here::here( "results", "wgcna", "PBMC_unspliced_WGCNA_table_Forearm_MRSS.tsv" ) ) %>%
+  filter( p.GS.Status < 0.05 )
+
+pbmc_forearm_mrss %>%
+  filter( GS.corr.Status > 0.0 ) %>%
+  select( gene_id ) %>%
+  write_tsv( x = ., path = here( "results", "WGCNA_PBMC_ForearmMRSS_Up_gprofile_input.tsv" ), col_names = FALSE )
+
+pbmc_forearm_mrss %>%
+  filter( GS.corr.Status < 0.0 ) %>%
+  select( gene_id ) %>%
+  write_tsv( x = ., path = here( "results", "WGCNA_PBMC_ForearmMRSS_Down_gprofile_input.tsv" ), col_names = FALSE )
+
+#mrss
+pbmc_mrss = read_tsv( file = here::here( "results", "wgcna", "PBMC_unspliced_WGCNA_table_MRSS.tsv" ) ) %>%
+  filter( p.GS.Status < 0.05 )
+
+pbmc_mrss %>%
+  filter( GS.corr.Status > 0.0 ) %>%
+  select( gene_id ) %>%
+  write_tsv( x = ., path = here( "results", "WGCNA_PBMC_TotalMRSS_Up_gprofile_input.tsv" ), col_names = FALSE )
+
+pbmc_mrss %>%
+  filter( GS.corr.Status < 0.0 ) %>%
+  select( gene_id ) %>%
+  write_tsv( x = ., path = here( "results", "WGCNA_PBMC_TotalMRSS_Down_gprofile_input.tsv" ), col_names = FALSE )
+```
+
+# Skin WGCNA
+```{r parse_skin}
+#dlco
+skin_dlco <- read_tsv( file = here::here( "results", "wgcna" , "Skin_unspliced_WGCNA_table_DLCO_perc_pred.tsv" ) ) %>%
+  filter( p.GS.Status < 0.05 )
+
+skin_dlco %>%
+  filter( GS.corr.Status > 0.0 ) %>%
+  select( gene_id ) %>%
+  write_tsv( x = ., path = here( "results", "WGCNA_Skin_DLCO_Up_gprofile_input.tsv" ), col_names = FALSE )
+
+skin_dlco %>%
+  filter( GS.corr.Status < 0.0 ) %>%
+  select( gene_id ) %>%
+  write_tsv( x = ., path = here( "results", "WGCNA_Skin_DLCO_Down_gprofile_input.tsv" ), col_names = FALSE )
+
+#fvc
+skin_fvc = read_tsv( file = here::here( "results", "wgcna", "Skin_unspliced_WGCNA_table_FVC_perc_pred.tsv" ) ) %>%
+  filter( p.GS.Status < 0.05 )
+
+skin_fvc %>%
+  filter( GS.corr.Status > 0.0 ) %>%
+  select( gene_id ) %>%
+  write_tsv( x = ., path = here( "results", "WGCNA_Skin_FVC_Up_gprofile_input.tsv" ), col_names = FALSE )
+
+skin_fvc %>%
+  filter( GS.corr.Status < 0.0 ) %>%
+  select( gene_id ) %>%
+  write_tsv( x = ., path = here( "results", "WGCNA_Skin_FVC_Down_gprofile_input.tsv" ), col_names = FALSE )
+
+#mrss
+skin_mrss = read_tsv( file = here::here( "results", "wgcna", "Skin_unspliced_WGCNA_table_MRSS.tsv" ) ) %>%
+  filter( p.GS.Status < 0.05 )
+
+skin_mrss %>%
+  filter( GS.corr.Status > 0.0 ) %>%
+  select( gene_id ) %>%
+  write_tsv( x = ., path = here( "results", "WGCNA_Skin_TotalMRSS_Up_gprofile_input.tsv" ), col_names = FALSE )
+
+skin_mrss %>%
+  filter( GS.corr.Status < 0.0 ) %>%
+  select( gene_id ) %>%
+  write_tsv( x = ., path = here( "results", "WGCNA_Skin_TotalMRSS_Down_gprofile_input.tsv" ), col_names = FALSE )
+```
+
+# Session info
+```{r versions}
+Sys.time()
+
+getwd()
+  
+sessionInfo()
+```

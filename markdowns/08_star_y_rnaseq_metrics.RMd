@@ -1,0 +1,255 @@
+---
+title: "Read and plot RNA-Seq metrics and STAR metrics"
+author: "Eli & David J. Morales-Heil"
+date: "March 10, 2020"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r libraries}
+library( here )
+library( tidyverse )
+library( reshape2 )
+library( data.table )
+library( cowplot )
+```
+
+```{r source_shared}
+source( here::here( 'src', 'shared_project_functions.R' ) )
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = TRUE,
+	message = FALSE,
+	fig.path = paste0( figure_dir, '/' ),
+	fig.keep = 'all',
+	dpi = 300,
+	fig.width = 11,
+	fig.height = 8.5
+)
+```
+
+```{r rgsm}
+rgsm <- read_csv( file = here::here( 'data', 'ssc_rnaseq_readgroup_info.csv' ) ) %>%
+  select( .data = ., RGSM, Tissue, GenStatus ) %>%
+  as.data.frame( . ) %>%
+  unique( . ) %>%
+  mutate( filepath = paste0( here::here( "output", "rnaseq_metrics" ), "/", RGSM, ".rnaseq_metrics" ) )
+```
+
+```{r read_tibble}
+rnametrics <- tibble()
+
+for ( idx in 1:nrow( rgsm ) ) {
+  current_tissue <- rgsm[ idx, "Tissue" ]
+  current_status <- rgsm[ idx, "GenStatus" ]
+  current_rgsm   <- rgsm[ idx, "RGSM" ]
+  current_fpath  <- rgsm[ idx, "filepath" ]
+  
+  tmp <- read_tsv( file = current_fpath, skip = 6, col_names = TRUE, n_max = 1 )
+  tmp$Tissue <- current_tissue
+  tmp$Status <- current_status
+  tmp$RGSM   <- current_rgsm
+  
+  if ( sum( dim( rnametrics ) ) > 0 ) {
+    rnametrics = rbind( rnametrics, tmp )
+  } else {
+    rnametrics = tmp
+  }
+  
+  rm( tmp )
+}
+```
+
+```{r correct_strand_tibble}
+strand_metrics <- rnametrics %>%
+  dplyr::rename( Correct = CORRECT_STRAND_READS ) %>%
+  dplyr::rename( Incorrect = INCORRECT_STRAND_READS ) %>%
+  select( RGSM, Correct, Incorrect ) %>%
+  mutate( total = Correct + Incorrect ) %>%
+  mutate( fraction = Correct / total ) %>%
+  dplyr::summarise(
+    avg = round( mean( fraction ), 3 ),
+    stdev = round( sd( fraction ), 3 ),
+    med = round( median( fraction ), 3 ),
+    mad = round( mad( fraction ), 3 )
+  )
+
+strand_metrics
+```
+
+```{r melt_rnaseq}
+melted_rnaseq <- rnametrics %>%
+  dplyr::rename( Ribosomal = RIBOSOMAL_BASES ) %>%
+  dplyr::rename( Exon = CODING_BASES ) %>%
+  dplyr::rename( Intron = INTRONIC_BASES ) %>%
+  dplyr::rename( Intergenic = INTERGENIC_BASES ) %>%
+  dplyr::rename( UTR = UTR_BASES ) %>%
+  select( ., RGSM, Tissue, Status, Ribosomal, Exon, Intron, Intergenic, UTR ) %>%
+  melt( . ) %>%
+  mutate( variable = factor( variable, levels = c( "Intergenic", "Ribosomal", "UTR", "Exon", "Intron" ) ) ) %>%
+  write_csv( x = ., path = here::here( "results", "melted_rnaseq_metrics.csv" ) )
+
+# DETERMINE TOTAL READS FOR EACH SAMPLE
+read_info = melted_rnaseq
+sample_info = group_by( read_info , RGSM )
+
+total_reads_frame = summarise( sample_info , total_reads = sum( value ) )
+
+# JOIN TOTAL READS INTO NEW COLUMN OF ORIGINAL READ INFO DATA FRAME AND CALCULATE READ FRACTION
+final_frame = left_join( read_info, total_reads_frame, by = 'RGSM' ) %>%
+  mutate( read_fraction = value / total_reads ) %>%
+  mutate( variable = factor( variable , levels = c( 'Ribosomal' , 'Intergenic' , 'UTR' , 'Exon' , 'Intron' ) ) ) 
+
+# DETERMINE RGSM ORDER FOR STACKED BAR PLOTTING
+final_wide = dcast( final_frame , RGSM + Tissue + Status ~ variable, value.var = 'read_fraction' ) 
+
+final_wide = final_wide[ order( c( final_wide$Intron, final_wide$exon, final_wide$UTR, final_wide$Intergenic, final_wide$Ribosomal ), decreasing = TRUE ) , ]
+
+final_wide =  mutate( final_wide , RGSM = as.character( RGSM ) )
+
+RGSM_order = as.vector( final_wide$RGSM )
+
+# INCORPORATE STACKED BAR ORDERING INTO THE 'FINAL_FRAME' DATAFRAME FOR PLOTTING
+final_frame = mutate( final_frame , RGSM = as.character( RGSM ) ) %>%
+  mutate( RGSM_factor = factor( RGSM , levels = RGSM_order ) ) %>%
+  mutate( RGSM = factor( RGSM ) )
+```
+
+```{r metric_mean_y_stats}
+stats <- final_frame %>%
+  dplyr::group_by( variable ) %>%
+  dplyr::summarise(
+    avg = round( mean( read_fraction ), 3 ), 
+    std_dev = round( sd( read_fraction ), 3 ),
+    med = round( median( read_fraction ), 3 ),
+    mad = round( mad( read_fraction ), 3 )
+  )
+
+stats
+```
+
+```{r rnaseq_metric_barplot}
+# PLOT STACKED BAR PLOT
+rnaseq_metric_plot <- ggplot( data = final_frame, aes( y = read_fraction, x = RGSM_factor, fill = variable ) ) +
+  theme_bw() +
+  geom_bar( color = 'black', stat = 'identity', position = 'stack' ) +
+  gg_bigger_texts +
+  theme( axis.text.x = element_blank(),
+         axis.ticks.x = element_blank(),
+         legend.title = element_blank(),
+         legend.position = 'top',
+         legend.spacing.x = unit( 0.2, 'cm' ),
+         legend.text = element_text( size = 12 ),
+         legend.key.size = unit( 0.5, 'cm' ) ) +
+  scale_fill_manual( values = colorBlindPalette ) +
+  xlab( 'Samples' ) +
+  ylab( 'Fraction of bases\n' )
+
+rnaseq_metric_plot
+
+save( rnaseq_metric_plot, file = file.path( r_object_dir, "rnaseq_metric_plot.RData" ) )
+```
+
+## Log R plot
+This will make a plot of spliced vs. total count-derived log R ratios.
+
+```{r gene_annotation}
+ensembl <- read_tsv( file = here::here( 'data', 'biomart_gene_transcript_map.txt.gz' ), col_names = TRUE ) %>%
+  dplyr::rename( .data = ., gene_id = `Gene stable ID` ) %>%
+  dplyr::rename( .data = ., symbol = `Gene name` ) %>%
+  select( .data = ., gene_id, symbol ) %>%
+  as.data.frame( . ) %>%
+  unique( . )
+```
+
+```{r load_logr_data}
+logr <- read_csv( file = here::here( "results", "gene_all_sample_rlog.csv.gz" ), col_names = TRUE, col_types = cols( .default = col_double(), gene_id = col_character() ) ) %>%
+  merge( x = ensembl, y = ., by = "gene_id" ) %>%
+  select( -symbol ) %>%
+  melt( . ) %>%
+  dplyr::rename( RGSM = variable ) %>%
+  dplyr::rename( logr = value ) %>%
+  mutate( Type = "Spliced" )
+
+logr <- read_csv( file = here::here( "results", "unspliced_all_sample_rlog.csv.gz" ), col_names = TRUE, col_types = cols( .default = col_double(), gene_id = col_character() ) ) %>%
+  merge( x = ensembl, y = ., by = "gene_id" ) %>%
+  select( -symbol ) %>%
+  melt( . ) %>%
+  dplyr::rename( RGSM = variable ) %>%
+  dplyr::rename( logr = value ) %>%
+  mutate( Type = "All" ) %>%
+  rbind( logr, . ) %>%
+pivot_wider( ., names_from = "Type", values_from = logr )
+```
+
+```{r logr_v_logr_plot}
+# full_logr_plot <- filter( logr, !is.na( All ) & !is.na( Spliced ) ) %>%
+#   ggplot( data = ., mapping = aes( x = All, y = Spliced ) ) +
+#   geom_point() +
+#   theme_bw() +
+#   gg_bigger_texts +
+#   xlab( "Whole gene" ) +
+#   ylab( "Exons" ) +
+#   geom_abline( slope = 1, intercept = 0, colour = "red", linetype = "dashed" )
+#   
+# h_cutoff = 25
+# v_cutoff = 25
+#   
+# full_logr_plot +
+#   geom_segment( aes( x = v_cutoff, y = -Inf, xend = v_cutoff, yend = h_cutoff ), linetype = 2 ) +
+#   geom_segment( aes( x = -Inf, y = h_cutoff, xend = v_cutoff, yend = h_cutoff ), linetype = 2 )
+# 
+# zoom_logr_plot = full_logr_plot +
+#   coord_cartesian( xlim = c( -5, v_cutoff ), ylim = c( -5, h_cutoff ) ) +
+#   stat_density_2d( aes( fill = stat( level ) ), geom = "polygon", alpha = 0.6 )
+# zoom_logr_plot
+```
+
+```{r model}
+fit <- lm( Spliced ~ All, data = logr )
+summary( fit )
+```
+
+```{r logr_linear_regression_plot}
+linear_model_plot <- filter( logr, !is.na( All ) & !is.na( Spliced ) ) %>%
+  ggplot( data = ., mapping = aes( x = All, y = Spliced ) ) +
+  geom_point() +
+  stat_smooth( method = "lm", col = "red", linetype = "dashed", se = TRUE,  level = 0.99 ) + 
+  theme_bw() +
+  gg_bigger_texts +
+  xlab( "Whole gene" ) +
+  ylab( "Exons" )
+
+h_cutoff = 25
+v_cutoff = 25
+
+model_with_box <- linear_model_plot +
+  geom_segment( aes( x = v_cutoff, y = -Inf, xend = v_cutoff, yend = h_cutoff ), linetype = 3 ) +
+  geom_segment( aes( x = -Inf, y = h_cutoff, xend = v_cutoff, yend = h_cutoff ), linetype = 3 )
+
+zoom_logr_plot = linear_model_plot +
+  coord_cartesian( xlim = c( -5, v_cutoff ), ylim = c( -5, h_cutoff ) )
+zoom_logr_plot
+
+save( linear_model_plot, file = file.path( r_object_dir, "linear_model_plot.RData" ) )
+save( zoom_logr_plot, file = file.path( r_object_dir, "zoom_logr_plot.RData" ) )
+```
+
+```{r metrics_fit_cowplot}
+top_plot <- plot_grid( rnaseq_metric_plot, labels = c( "a" ) )
+bottom_plot <- plot_grid( model_with_box, zoom_logr_plot, labels = c( 'b', 'c' ), nrow = 1, rel_widths = c( 2, 1 ) )
+
+plot_grid( top_plot, bottom_plot, ncol = 1 )
+```
+
+# Session info
+```{r versions}
+Sys.time()
+
+getwd()
+  
+sessionInfo()
+```

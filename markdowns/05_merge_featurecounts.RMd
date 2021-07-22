@@ -1,0 +1,107 @@
+---
+title: "Merge gene and unspliced counts"
+author: "Eli"
+date: "April 03, 2019"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r libraries}
+library( here )
+library( tidyverse )
+```
+
+```{r source_shared}
+source( here::here( 'src', 'shared_project_functions.R' ) )
+```
+
+```{r rgsm}
+rgids <- read_csv( file = here::here( 'data', 'ssc_rnaseq_readgroup_info.csv' ) )
+
+rgsm_list <- rgids %>%
+  pull( RGSM ) %>%
+  sort( . ) %>%
+  unique( . )
+```
+
+## Spliced read counts
+```{r spliced_reads}
+# directory vars
+count_dir <- here::here( 'output', 'counts' )
+decoy_dir <- here::here( 'output', 'decoys' )
+count_strandedness <- 'stranded'
+decoy_strandedness <- 'unstranded'
+
+# read
+spliced_tibble <- tibble()
+
+for ( rgsm_idx in 1:length( rgsm_list ) ) {
+  curr_rgsm <- rgsm_list[ rgsm_idx ]
+  
+  curr_rgid_list <- rgids %>%
+    filter( .data = ., RGSM == curr_rgsm ) %>%
+    pull( .data = ., RGID )
+  
+  counts_path_list <- paste0( count_dir, "/", curr_rgid_list, "_", count_strandedness, ".count" )
+  decoys_path_list <- paste0( decoy_dir, "/", curr_rgid_list, "_", decoy_strandedness, ".count" )
+  
+  temp_spliced <- readFeatureCounts( counts_path_list, curr_rgsm ) %>%
+    rbind( ., readFeatureCounts( decoys_path_list, curr_rgsm ) )
+  
+  if( sum( dim( spliced_tibble ) ) > 0 ) {
+    spliced_tibble <- merge( x = spliced_tibble, y = temp_spliced, all = TRUE )
+  } else {
+    spliced_tibble = temp_spliced
+  }
+}
+
+spliced_tibble %>%
+  mutate_at( .tbl = ., .vars = vars( ends_with( 'm' ) ), .funs = as.integer ) %>%
+  write_tsv( x = ., path = here::here( 'results', 'gene_featurecounts.tsv.gz' ) )
+```
+
+## SAF (unspliced reads)
+```{r unspliced_reads}
+# directory vars
+count_dir <- here::here( 'output', 'unspliced_counts' )
+decoy_dir <- here::here( 'output', 'decoys' )
+count_strandedness <- 'stranded'
+decoy_strandedness <- 'unstranded'
+
+# read
+spliced_tibble <- tibble()
+
+for ( rgsm_idx in 1:length( rgsm_list ) ) {
+  curr_rgsm <- rgsm_list[ rgsm_idx ]
+  
+  curr_rgid_list <- rgids %>%
+    filter( .data = ., RGSM == curr_rgsm ) %>%
+    pull( .data = ., RGID )
+  
+  counts_path_list <- paste0( count_dir, "/", curr_rgid_list, "_", count_strandedness, ".count" )
+  decoys_path_list <- paste0( decoy_dir, "/", curr_rgid_list, "_", decoy_strandedness, ".count" )
+  
+  temp_spliced <- readFeatureCounts( counts_path_list, curr_rgsm ) %>%
+    rbind( ., readFeatureCounts( decoys_path_list, curr_rgsm ) )
+  
+  if( sum( dim( spliced_tibble ) ) > 0 ) {
+    spliced_tibble <- merge( x = spliced_tibble, y = temp_spliced, all = TRUE )
+  } else {
+    spliced_tibble = temp_spliced
+  }
+}
+
+spliced_tibble %>%
+  mutate_at( .tbl = ., .vars = vars( ends_with( 'm' ) ), .funs = as.integer ) %>%
+  write_tsv( x = ., path = here::here( 'results', 'unspliced_featurecounts.tsv.gz' ) )
+```
+
+# Session info
+```{r versions}
+Sys.time()
+
+getwd()
+  
+sessionInfo()
+```

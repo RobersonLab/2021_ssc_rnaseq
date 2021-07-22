@@ -1,0 +1,133 @@
+---
+title: "Case - Control Demographics"
+author: "Eli Roberson"
+date: "August 07, 2019"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r libraries}
+library( here )
+library( knitr )
+library( tidyverse )
+```
+
+```{r source_shared}
+source( here::here( 'src', 'shared_project_functions.R' ) )
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = TRUE,
+	message = FALSE,
+	fig.path = paste0( figure_dir, '/' ),
+	fig.keep = 'all',
+	dpi = 300,
+	fig.width = 11,
+	fig.height = 8.5
+)
+```
+
+```{r read_and_filter}
+demographics <- read_csv( file = here::here( "data/demographics.csv" ) ) %>%
+  filter( .data = ., Subtype %in% c( "Control", "lcSSc", "dcSSc" ) )
+```
+
+```{r generate_demos}
+n <- dplyr::group_by( .data = demographics, GenStatus ) %>%
+  dplyr::summarise( .data = ., n = n() )
+
+sex <- filter( .data = demographics, Sex == "F" ) %>%
+  dplyr::group_by( .data = ., GenStatus ) %>%
+  dplyr::summarise( .data = ., Female = n() )
+
+age <- dplyr::group_by( .data = demographics, GenStatus ) %>%
+  dplyr::summarise( .data = .,
+                    mean_age = mean( Enrollment_age ),
+                    sd_age   = sd( Enrollment_age ) )
+
+ethnicity <- with( demographics, table( GenStatus, Ethnicity ) )
+```
+
+```{r demographics_stats}
+age_ttest <- with( demographics, t.test( Enrollment_age ~ GenStatus ) )$p.value
+
+ethnicity_fisher_test <- ethnicity %>%
+  fisher.test( . ) %>%
+  unlist( . ) %>%
+  .[ 'p.value' ] %>%
+  unname( . ) %>%
+  as.double( . )
+
+sex_fisher_test <- with( demographics, table( GenStatus, Sex ) ) %>%
+  fisher.test( . ) %>%
+  unlist( . ) %>%
+  .[ 'p.value' ] %>%
+  unname( . ) %>%
+  as.double( . )
+```
+
+```{r output}
+ethnicity_df <- as.data.frame( ethnicity ) %>%
+  spread( data = ., key = Ethnicity, value = Freq )
+
+out_table <- merge( n, age ) %>%
+  merge( ., sex ) %>%
+  merge( ethnicity_df ) %>%
+  rbind( NA ) %>%
+  mutate( title = paste0( GenStatus, " (n=", n, ")" ) ) %>%
+  mutate( `Age mean (SD)` = case_when(
+    is.na( mean_age ) ~ sprintf( "%.2e", age_ttest ),
+    TRUE ~ paste0( sprintf( "%.1f", round( mean_age, 1 ) ), " (", sprintf( "%.1f", round( sd_age, 1 ) ), ")" )
+    ) ) %>%
+  mutate( `F (%)` = case_when(
+    is.na( Female ) ~ sprintf( "%.2e", sex_fisher_test ),
+    TRUE ~ n_plus_percent_string( Female, n )
+  ) ) %>%
+  mutate( `Deaths (%)` = NA ) %>%
+  mutate( Ethnicity = case_when(
+    is.na( mean_age ) ~ sprintf( "%.2e", ethnicity_fisher_test ),
+    TRUE ~ NA_character_
+  ) ) %>%
+  mutate( Asian = n_plus_percent_string( A, n ) ) %>%
+  mutate( Black = n_plus_percent_string( B, n ) ) %>%
+  mutate( Hispanic = n_plus_percent_string( H, n ) ) %>%
+  mutate( White = n_plus_percent_string( W, n ) )
+
+select( out_table, title, `Age mean (SD)`, `F (%)`, Ethnicity, Asian, Black, Hispanic, White, `Deaths (%)` ) %>%
+  t( . ) %>%
+  kable( . )
+```
+
+```{r sample_counts}
+# Reloading demographics b/c we don't want filtered now.
+# all samples.
+demographics <- read_csv( file = here::here( "data/demographics.csv" ) )
+
+rgsm_data <- read_csv( file = here::here( 'data/ssc_rnaseq_readgroup_info.csv' ) ) %>%
+  select( .data = ., Individual, Timepoint ) %>%
+  mutate( .data = ., Timepoint = case_when(
+    is.na( Timepoint ) ~ '0m',
+    TRUE ~ Timepoint
+  )) %>%
+  as.data.frame( . ) %>%
+  unique( . ) %>%
+  merge( x = ., y = select( demographics, Individual, Subtype ) )
+
+sample_summary <- rgsm_data %>%
+  dplyr::group_by( .data = ., Subtype, Timepoint ) %>%
+  dplyr::summarise( .data = .,
+                    count = n() ) %>%
+  spread( data = ., key = Timepoint, value = count )
+kable( sample_summary )
+```
+
+# Session info
+```{r versions}
+Sys.time()
+
+getwd()
+  
+sessionInfo()
+```
