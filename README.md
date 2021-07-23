@@ -12,8 +12,6 @@ This repository contains the code used to process data and to generate statistic
 
 Beware all ye who enter here: this project was started before we switched to [Snakemake](https://snakemake.readthedocs.io/en/stable/) for workflow management. This analysis is instead coordinated using [Make](https://www.gnu.org/software/make/manual/make.html). Analyses for highly parallelizable operations were performed on a cluster at Washington University using PBS scripts. Other operations were performed on a local lab server. Much of the figure generation and analysis was performed using a local laptop. This all means that the overall workflow is less easy to follow and reimplement than a Snakemake workflow, but more reproducible than having no workflow management at all.
 
-## Data resources
-
 ## Software Requirements
 
 ### Software - general
@@ -74,3 +72,6 @@ Beware all ye who enter here: this project was started before we switched to [Sn
 * Knit the R Markdown analysis files in order.
 
 **Critically important note** All command-line analyses should be run from the top-level of the repository, i.e. "make -f makefiles/run_salmon.make" to ensure proper use of relative directories. R markdown files use the "here" package and can be knitted as is.
+
+## Recreating analysis - shortcut method
+The most important parts of this analysis are performed using R Markdown. If you want to perform the analyses (DESeq2, WGCNA, etc) without running the alignments and such, you can do the R Markdown portion of the analysis. The most critical files will be downloaded automatically from FigShare by running the first script.
