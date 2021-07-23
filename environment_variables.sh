@@ -26,7 +26,6 @@ BAM_EXT=bam
 FASTQ_BASE_NAMES=data/fastq_base_names.txt
 RGSM_NAMES=data/rgsm_list.txt
 RG_INFO_FILE=data/ssc_rnaseq_readgroup_info.csv
-TISSUE_LIST=data/tissue_list.txt
 
 #############
 # Junctions #
