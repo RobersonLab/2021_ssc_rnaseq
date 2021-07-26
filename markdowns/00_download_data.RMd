@@ -1,0 +1,75 @@
+---
+title: "Download data from FigShare"
+author: "Eli Roberson"
+date: "July 26, 2021"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r libraries}
+library( here )
+library( tidyverse )
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = TRUE,
+	message = FALSE
+)
+```
+
+```{r lists}
+data_vects <- c( 
+  "bmi_mrss_meds.csv" = "https://ndownloader.figshare.com/files/28934529",
+  "demographics.csv" = "https://ndownloader.figshare.com/files/28934550",
+  "fastq_base_names.txt" = "https://ndownloader.figshare.com/files/28934553",
+  "lung_fxn.csv" = "https://ndownloader.figshare.com/files/28934571",
+  "rgsm_list.txt" = "https://ndownloader.figshare.com/files/28934580",
+  "ssc_rnaseq_readgroup_info.csv" = "https://ndownloader.figshare.com/files/28934595" )
+  
+results_vects <- c(
+  "gene_featurecounts.tsv.gz" = "https://ndownloader.figshare.com/files/28934637",
+  "melted_rnaseq_metrics.csv" = "https://ndownloader.figshare.com/files/28934697",
+  "unspliced_featurecounts.tsv.gz" = "https://ndownloader.figshare.com/files/28934664"
+)
+```
+
+```{r grab_files}
+# download and rename files from figshare
+# filenames are the vector names
+# links are the vector values
+
+# data files
+for ( idx in 1:length( data_vects ) ) {
+  fname <- names( data_vects )[ idx ]
+  url <- data_vects[ idx ] %>% unname( . )
+  dest <- here( 'data', fname )
+  
+  cat( paste0( "URL: ", url, "\n" ) )
+  cat( paste0( "Path: ", dest, "\n" ) )
+  
+  download.file( url = url, destfile = dest, mode = 'wb' )
+}
+
+# results files
+for ( idx in 1:length( results_vects ) ) {
+  fname <- names( results_vects )[ idx ]
+  url <- results_vects[ idx ] %>% unname( . )
+  dest <- here( 'results', fname )
+  
+  cat( paste0( "URL: ", url, "\n" ) )
+  cat( paste0( "Path: ", dest, "\n" ) )
+  
+  download.file( url = url, destfile = dest, mode = 'wb' )
+}
+```
+
+# Session info
+```{r versions}
+Sys.time()
+
+getwd()
+  
+sessionInfo()
+```
