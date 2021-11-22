@@ -1,6 +1,6 @@
 # 2021 systemic sclerosis PBMC and skin punch biopsy RNA-Seq
 
-Preprint: [bioRxiv](https://www.biorxiv.org/content/10.1101/2021.11.20.468677v1)
+Preprint: [RNA-Seq analysis identifies novel roles for the primary cilia gene *SPAG17* and the *SOX9* locus non-coding RNAs in systemic sclerosis](https://www.biorxiv.org/content/10.1101/2021.11.20.468677v1)
 
 Downloadable data: [FigShare Project](https://figshare.com/projects/2021_Roberson_lab_systemic_sclerosis_transcriptome_data/118698)
 
