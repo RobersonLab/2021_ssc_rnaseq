@@ -1,0 +1,112 @@
+---
+title: "Checking age effects"
+author: "Eli"
+date: "March 10, 2022"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r libraries}
+library( here )
+library( tidyverse )
+library( reshape2 )
+library( broom )
+```
+
+```{r source_shared}
+source( here::here( 'src', 'shared_project_functions.R' ) )
+```
+
+```{r useful_constants}
+count_type <- 'unspliced'
+```
+
+```{r gene_annotation}
+ensembl <- read_tsv( file = here::here( 'data', 'biomart_gene_transcript_map.txt.gz' ), col_names = TRUE ) %>%
+  dplyr::rename( .data = ., gene_id = `Gene stable ID` ) %>%
+  dplyr::rename( .data = ., transcript_id = `Transcript stable ID` ) %>%
+  dplyr::rename( .data = ., symbol = `Gene name` ) %>%
+  dplyr::rename( .data = ., gene_biotype = `Gene type` ) %>%
+  dplyr::rename( .data = ., transcript_biotype = `Transcript type` ) %>%
+  select( .data = ., gene_id, symbol, gene_biotype ) %>%
+  as.data.frame( . ) %>%
+  unique( . )
+```
+
+```{r rgsm}
+demographics <- read_csv( file = here::here( 'data', 'demographics.csv' ) ) %>%
+  filter( .data = ., Subtype %in% c( 'Control', 'lcSSc', 'dcSSc' ) ) %>%
+  select( .data = ., Individual, Subtype, Enrollment_age ) %>%
+  dplyr::rename( Age = Enrollment_age )
+
+rgsm <- read_csv( file = here::here( 'data', 'ssc_rnaseq_readgroup_info.csv' ) ) %>%
+  select( .data = ., RGSM, Individual, Status, GenStatus, Tissue, Cohort, Machine, Cycles, Timepoint ) %>%
+  mutate( .data = ., filter_criteria = case_when(
+    GenStatus == "Control" ~ 'keep',
+    GenStatus == "SSc" & Timepoint == '0m' ~ 'keep',
+    TRUE ~ 'drop'
+  )) %>%
+  filter( .data = ., filter_criteria == 'keep' ) %>%
+  as.data.frame( . ) %>%
+  unique( . ) %>%
+  merge( x = ., y = demographics, by = "Individual" )
+
+rgsm_list <- rgsm %>%
+  pull( RGSM ) %>%
+  sort( . ) %>%
+  unique( . )
+```
+
+```{r load_rlog}
+genes_to_check <- read_tsv( file = here::here( 'data', 'individual_gene_to_check_age.txt' ) )
+
+rlog <- read_csv( file = here::here( 'results', 'unspliced_0m_sample_rlog.csv.gz' ) )
+```
+
+```{r filtering}
+ensembl <- filter( .data = ensembl, symbol %in% genes_to_check$gene )
+
+rlog <- filter( .data = rlog, gene_id %in% ensembl$gene_id )
+
+melted <- merge( x = rlog, y = ensembl, by = 'gene_id' ) %>%
+  melt( . ) %>%
+  dplyr::rename( RGSM = variable ) %>%
+  merge( x = select( rgsm, RGSM, Status, Tissue, Age ), y = ., by = "RGSM" )
+```
+
+```{r get_regressions}
+output <- tibble()
+
+for ( row_idx in 1:nrow( genes_to_check ) ) {
+  current_gene <- genes_to_check$gene[ row_idx ]
+  current_tissue <- genes_to_check$tissue[ row_idx ]
+  
+  control_name <- paste0( current_tissue, "_Control" )
+  case_name <- paste0( current_tissue, "_SSc" )
+  
+  temp <- filter( .data = melted, Tissue == current_tissue ) %>%
+    filter( ., symbol == current_gene ) %>%
+    mutate( ., cat_status = factor( Status, levels = c( control_name, case_name ) ) ) %>%
+    mutate( ., int_status = as.integer( cat_status ) - 1 ) %>%
+    lm( data = ., formula = value ~ Age + int_status ) %>%
+    tidy( . ) %>%
+    mutate( symbol = current_gene ) %>%
+    mutate( tissue = current_tissue )
+  
+  output = rbind( output, temp )
+  
+  rm( temp )
+}
+
+write_tsv( x = output, file = here::here( 'results', 'regression_output.tsv' ) )
+```
+
+# Session info
+```{r versions}
+Sys.time()
+
+getwd()
+  
+sessionInfo()
+```

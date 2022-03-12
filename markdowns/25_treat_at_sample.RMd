@@ -1,0 +1,62 @@
+---
+title: "Treatment at sampling"
+author: "Eli"
+date: "March 10, 2022"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r libraries}
+library( here )
+library( tidyverse )
+library( reshape2 )
+```
+
+```{r source_shared}
+source( here::here( 'src', 'shared_project_functions.R' ) )
+```
+
+```{r info}
+demographics <- read_csv( file = here::here( 'data', 'demographics.csv' ) ) %>%
+  filter( .data = ., Subtype != "Control" ) %>%
+  select( .data = ., Individual, Subtype )
+
+med_info <- read_csv( file = here::here( 'data', 'bmi_mrss_meds.csv' ) ) %>%
+  select( -BMI, -MRSS, -Forearm_MRSS ) %>%
+  dplyr::rename( `Mycofenolate mofetil` = MMF ) %>%
+  dplyr::rename( Hydroxychloroquine = Plaquenil ) %>%
+  dplyr::rename( Methotrexate = MTX ) %>%
+  dplyr::rename( Rituximab = RTX )
+
+all_ssc_samples <- select( med_info, Individual, Timepoint )
+```
+
+```{r combine}
+med_table <- melt( med_info ) %>%
+  filter( value > 0 ) %>%
+  mutate( variable = as.character( variable ) ) %>%
+  dplyr::group_by( Individual, Timepoint ) %>%
+  summarize(
+    Medication = paste( sort( variable ), collapse = "; " )
+  ) %>%
+  merge( x = all_ssc_samples, y = ., by = c( "Individual", "Timepoint" ), all = TRUE ) %>%
+  merge( x = demographics, y = ., by = c( "Individual" ), all.x = TRUE ) %>%
+  mutate( Medication = case_when(
+    is.na( Medication ) ~ "None",
+    TRUE ~ Medication
+  ))
+```
+
+```{r write_med_table}
+write_tsv( x = med_table, file = here::here( 'results', 'meds_at_sampling.tsv' ) )
+```
+
+# Session info
+```{r versions}
+Sys.time()
+
+getwd()
+  
+sessionInfo()
+```

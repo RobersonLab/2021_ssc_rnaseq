@@ -35,6 +35,7 @@ Beware all ye who enter here: this project was started before we switched to [Sn
 * RNA-STAR index of modified FASTA file
 
 ### Software - R packages
+* broom
 * cowplot
 * data.table
 * DESeq2
