@@ -1,0 +1,121 @@
+---
+title: "Checking cross-tissue correlation"
+author: "Eli"
+date: "March 30, 2022"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r libraries}
+library( here )
+library( tidyverse )
+library( reshape2 )
+library( broom )
+```
+
+```{r source_shared}
+source( here::here( 'src', 'shared_project_functions.R' ) )
+```
+
+```{r gene_annotation}
+ensembl <- read_tsv( file = here::here( 'data', 'biomart_gene_transcript_map.txt.gz' ), col_names = TRUE ) %>%
+  dplyr::rename( .data = ., gene_id = `Gene stable ID` ) %>%
+  dplyr::rename( .data = ., transcript_id = `Transcript stable ID` ) %>%
+  dplyr::rename( .data = ., symbol = `Gene name` ) %>%
+  dplyr::rename( .data = ., gene_biotype = `Gene type` ) %>%
+  dplyr::rename( .data = ., transcript_biotype = `Transcript type` ) %>%
+  select( .data = ., gene_id, symbol, gene_biotype ) %>%
+  as.data.frame( . ) %>%
+  unique( . )
+```
+
+# Load DEGs from unspliced counts
+```{r load_degs_unspliced}
+skin_deg_list <- read_tsv( file = here::here( "results", "DiffExp_0m_SSc_over_Control_Skin_unspliced.tsv" )) %>%
+  filter( qval < 0.05 & abs( FoldChange ) >= 1.5 ) %>%
+  pull( gene_id )
+
+pbmc_deg_list <- read_tsv( file = here::here( "results", "DiffExp_0m_SSc_over_Control_PBMC_unspliced.tsv" )) %>%
+  filter( qval < 0.05 & abs( FoldChange ) >= 1.5 ) %>%
+  pull( gene_id )
+
+deg_shared <- intersect( x = skin_deg_list, y = pbmc_deg_list )
+
+deg_shared_frame <- tibble( gene_id = deg_shared, What = "DEG" )
+```
+
+```{r read_correlations}
+pbmc_correlation_list <- read_tsv( file = here( "results", "pbmc_wgcna_merged.tsv" ) ) %>%
+  pull( gene_id )
+
+skin_correlation_list <- read_tsv( file = here( "results", "skin_wgcna_merged.tsv" ) ) %>%
+  pull( gene_id )
+
+correlation_shared <- intersect( pbmc_correlation_list, skin_correlation_list )
+
+correlation_shared_frame <- tibble( gene_id = correlation_shared, What = "Correlation" )
+```
+
+```{r symbols}
+combined_frame <- deg_shared_frame %>%
+  rbind( correlation_shared_frame ) %>%
+  dplyr::group_by( gene_id ) %>%
+  summarise(
+    What = paste( sort( What ), collapse = ";" )
+  )
+```
+
+```{r load_rlog}
+rlog <- read_csv(
+  file = here::here( 'results', 'unspliced_wgcna_vst_combat_adjusted.csv.gz' ),
+  col_names = TRUE,
+  col_types = cols( .default = col_double(), gene_id = col_character() ) ) %>%
+  filter( gene_id %in% combined_frame$gene_id ) %>%
+  melt( . ) %>%
+  dplyr::rename( RGSM = variable ) %>%
+  separate( data = ., col = RGSM, into = c( 'Individual', 'Tissue', 'Status', 'Timepoint' ) ) %>%
+  mutate( sample_id = paste0( Individual, "_", Timepoint ) ) %>%
+  select( gene_id, sample_id, Tissue, value ) %>%
+  pivot_wider( data = ., id_cols = c( gene_id, sample_id ), values_from = value, names_from = Tissue )
+```
+
+```{r correlation}
+gene_list <- pull( .data = rlog, var = gene_id ) %>%
+  sort( . ) %>%
+  unique( . )
+
+out_tibble <- tibble()
+
+for ( idx in 1:length( gene_list ) ) {
+  current_gene <- gene_list[ idx ]
+  
+  filtered_input <- filter( .data = rlog, gene_id == current_gene )
+  
+  out_tibble <- with( filtered_input, cor.test( x = PBMC, y = Skin, method = "spearman" ) ) %>%
+    tidy( . ) %>%
+    mutate( gene_id = current_gene ) %>%
+    relocate( .before = estimate, gene_id ) %>%
+    rbind( out_tibble, . )
+}
+
+out_tibble$p_adjust = p.adjust( out_tibble$p.value )
+out_tibble <- select(out_tibble,  -method, -alternative ) %>%
+  dplyr::rename( PearsonCorr = estimate ) %>%
+  merge( x = ensembl, y = ., by = "gene_id" ) %>%
+  merge( x = ., y = combined_frame, by = "gene_id" ) %>%
+  arrange( p_adjust, `p.value` )
+```
+
+```{r write}
+write_tsv( x = out_tibble, file = here( 'results', 'between_tissue_correlation.tsv' ) )
+```
+
+# Session info
+```{r versions}
+Sys.time()
+
+getwd()
+  
+sessionInfo()
+```
