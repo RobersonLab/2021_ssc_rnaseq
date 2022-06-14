@@ -24,7 +24,7 @@ knitr::opts_chunk$set(
 	message = FALSE,
 	fig.path = paste0( figure_dir, '/' ),
 	fig.keep = 'all',
-	dpi = 300,
+	dpi = 150,
 	fig.width = 11,
 	fig.height = 8.5,
 	dev = 'tiff'
@@ -99,13 +99,13 @@ skin_volcano <- make_ggplot_volcano( deg_dataframe = deg_gene_stats, case_name =
 volcano <- skin_volcano +
   gg_reduce_pathway_text
 
-volcano <- plot_grid( volcano, labels = "a" )
+volcano <- plot_grid( volcano, labels = "A" )
 
 pathways <- plot_grid( skin_down_ggplot + gg_reduce_pathway_text + expand_limits( y = c( 0, 25 ) ),
                        skin_up_ggplot + gg_reduce_pathway_text + expand_limits( y = c( 0, 25 ) ),
                        nrow = 2,
                        rel_heights = c( 1, 3 ),
-                       labels = c( "b", "c" ) )
+                       labels = c( "B", "C" ) )
 
 merged_volcano_y_pathway <- plot_grid( volcano,
                                        pathways,
